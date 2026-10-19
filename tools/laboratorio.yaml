@@ -1,0 +1,45 @@
+# Descripción del laboratorio para generar_mundo.py
+#
+# Unidades: metros. Ángulos (yaw): grados, positivo = giro antihorario visto desde arriba.
+
+info:
+  nombre: laboratorio
+  origen: "Esquina SO, junto a la puerta principal"   # descríbelo para no olvidarlo
+  fecha_medicion: "2026-10-19"
+
+# Donde aparece el robot al arrancar la simulación (centro de la base).
+# Se pasa al launch: x:=..  y:=..  Y:=.. (yaw en radianes; el script te lo imprime)
+robot_inicio:
+  x: 28.0
+  y: 4.0
+  yaw: 0
+
+# Paredes: de un punto a otro. Para una puerta, parte la pared en dos tramos
+# y deja el hueco entre ellos.
+walls:
+  - {name: pared_larga,  from: [0.0, 0.0],  to: [30.0, 0.0],  thickness: 0.2, height: 3}
+  - {name: pared_zona_id,  from: [30.0, 0.0],  to: [30.0, 9.0], thickness: 0.2, height: 3}
+  - {name: pared_hasta_comedor,   from: [30.0, 9.0], to: [8.0, 9.0], thickness: 0.3, height: 3}
+  - {name: pared_comedor,  from: [8.0, 9.0], to: [8.0, 7.0],  thickness: 0.2, height: 3}
+  - {name: pared_hasta_puerta,  from: [8.0, 7.0],  to: [0.0, 7.0],  thickness: 0.2, height: 3}
+  - {name: pared_puerta, from: [0.0, 7.0], to: [0.0, 0.0], thickness: 0.2, height: 3}
+
+# center = center of the object from above; size = [lenght_x, width_y, height]
+boxes:
+  - {name: armario_plc_1,    center: [10.35, 7.0], size: [0.7, 0.8, 2.5], yaw: 0}
+  - {name: armario_plc_2,    center: [14.0, 7.0], size: [0.7, 0.8, 2.5], yaw: 0}
+  - {name: armario_plc_3,    center: [17.7, 7.0], size: [0.7, 0.8, 2.5], yaw: 0}
+  - {name: cosas_tiradas, center: [15.5, 1.1],  size: [19.0, 2.3, 2.5], yaw: 0}
+  - {name: armario_electrico, center: [29.75, 5.0], size: [0.5, 2.0, 2.5], yaw: 0}
+  - {name: palet, center: [29.0, 6.5], size: [2.0, 1.0, 0.8], yaw: 0}
+  - {name: palet2, center: [29.0, 0.5], size: [2.0, 1.0, 0.8], yaw: 0}
+  - {name: armario_electrico2, center: [29.0, 2.0], size: [2.0, 1.0, 0.8], yaw: 0}
+
+# size = [lenght, width, height]; leg = leg: leg lenght (cuadrada)
+tables:
+  - {name: mesa_benat, center: [25.25, 5.9], size: [1.5, 0.8, 0.75], yaw: 0,  leg: 0.05}
+  - {name: mesa_robots, center: [26, 8.5], size: [8, 0.8, 0.75], yaw: 0, leg: 0.05}
+
+# Columnas y objetos redondos
+# cylinders:
+#  - {name: columna_1, center: [6.0, 1.5], radius: 0.25, height: 2.5}

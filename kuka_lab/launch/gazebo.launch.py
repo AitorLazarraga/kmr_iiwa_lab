@@ -29,13 +29,13 @@ def generate_launch_description():
     world_arg = DeclareLaunchArgument(
             "world",
             default_value=PathJoinSubstitution([
-                pkg, "world", "kmr_iiwa.world",
+                pkg, "world", "laboratorio.world",
             ]),
         )
 
-    x_arg = DeclareLaunchArgument("x", default_value="0")    
-    y_arg = DeclareLaunchArgument("y", default_value="0")
-    z_arg = DeclareLaunchArgument("z", default_value="0")
+    x_arg = DeclareLaunchArgument("x", default_value="28.0")    
+    y_arg = DeclareLaunchArgument("y", default_value="4.0")
+    z_arg = DeclareLaunchArgument("z", default_value="0.0")
     R_arg = DeclareLaunchArgument("R", default_value="0")
     P_arg = DeclareLaunchArgument("P", default_value="0")
     Y_arg = DeclareLaunchArgument("Y", default_value="0")
