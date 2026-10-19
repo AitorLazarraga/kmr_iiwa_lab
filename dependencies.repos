@@ -1,0 +1,21 @@
+repositories:
+  lbr_fri_ros2_stack:
+    type: git
+    url: https://github.com/lbr-stack/lbr_fri_ros2_stack.git
+    version: f55f23d03e8dfeaafdd9d50fabf6a267445d753d 
+  fri:
+    type: git
+    url: https://github.com/lbr-stack/fri
+    version: dc7d613d42571e458dd62ea814a0a47a209487d8
+  lbr_fri_idl:
+    type: git
+    url: https://github.com/lbr-stack/lbr_fri_idl
+    version: e422bff2b3d70ec47853145b35645980df623a60
+  lbr_iiwa14_r820_description:
+    type: git
+    url: https://github.com/lbr-stack/lbr_iiwa14_r820_description.git
+    version: 86ac0532841a90694afe6a65c300f08b55eb1296
+  gz_virtual_base_system:
+    type: git
+    url: https://github.com/torydebra/gz_virtual_base_system
+    version: f08f2843dc1072c257f3f094f9237b31654005ba

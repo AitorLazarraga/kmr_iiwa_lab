@@ -1,0 +1,148 @@
+<?xml version="1.0"?>
+<robot name="kmr" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:include filename="$(find kuka_lab)/urdf/kmp200_macro.urdf.xacro"/>
+  <xacro:include filename="$(find lbr_iiwa14_r820_description)/urdf/lbr_iiwa14_r820_macro.xacro" />
+  <xacro:include filename="$(find kuka_lab)/urdf/lbr_gazebo.xacro" />
+  <xacro:include filename="$(find lbr_ros2_control)/urdf/lbr_system_interface.xacro" />
+  <xacro:include filename="$(find gz_virtual_base_system)/urdf/virtual_base_macro.urdf.xacro" />
+
+  <!-- arguments -->
+  <xacro:arg name="root_link" default="world"/> <!-- Put world for the gazebo model, odom for nav2 -->
+  <xacro:arg name="robot_name" default="kmr_iiwa" />
+  <xacro:arg name="base_name" default="kmp" />
+  <xacro:arg name="arm_name" default="iiwa" />
+  <xacro:arg name="mode" default="gazebo" />
+  <xacro:arg
+      name="system_config_path"
+      default="$(find lbr_ros2_control)/config/lbr_system_config.yaml" />
+  <xacro:arg
+      name="initial_joint_positions_path"
+      default="$(find lbr_ros2_control)/config/initial_joint_positions.yaml" />
+      
+  <!-- ROBOT -->
+
+  <xacro:kuka_kmp200 base_name="$(arg base_name)"/>
+
+  <xacro:lbr_iiwa14_r820
+    robot_name="$(arg robot_name)"/>
+  <joint name="$(arg base_name)_to_$(arg robot_name)_link_0" type="fixed">
+    <origin xyz="0.3633 -0.1842 0.7011" rpy="0 0 -1.5708"/>
+    <parent link="$(arg base_name)_base_link"/>
+    <child link="$(arg robot_name)_link_0"/>
+  </joint>
+
+  <!-- gaebo plugins -->
+
+  <xacro:lbr_gazebo 
+    robot_name="$(arg robot_name)"
+    controller_config_path="$(find kuka_lab)/config/controllers/gazebo.yaml" />
+  <xacro:lbr_system_interface
+    robot_name="$(arg robot_name)"
+    mode="$(arg mode)"
+    system_config_path="$(arg system_config_path)"
+    initial_joint_positions_path="$(arg initial_joint_positions_path)" />
+
+ <!-- OPTION 1. Gazebo plugin that call setVelocity Gazebo API. Works
+  strangely, base speed is too low -->
+  <!-- <xacro:include filename="$(find gazebo_planar_move_plugin)/urdf/plugin_macro.urdf.xacro" />
+  <xacro:planar_move_plugin
+    robot_name="$(arg robot_name)"
+    base_name="$(arg base_name)_base_link" /> -->
+
+ <!-- OPTION 2. virtual joints to just be controlled directly, with possibly
+ external script to compute correct rotations-->
+  <!-- <ros2_control name="base_joints" type="system">
+  <hardware>
+    <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+  </hardware>
+  <joint name="virtual_joint_x">
+    <command_interface name="velocity"/>
+    <state_interface name="position"/>
+    <state_interface name="velocity"/>
+  </joint>
+  <joint name="virtual_joint_y">
+    <command_interface name="velocity"/>
+    <state_interface name="position"/>
+    <state_interface name="velocity"/>
+  </joint>
+  <joint name="virtual_joint_yaw">
+    <command_interface name="velocity"/>
+    <state_interface name="position"/>
+    <state_interface name="velocity"/>
+  </joint>
+  </ros2_control> -->
+
+  <!-- OPTION 3. virtual joints, virtual base system -->
+  <xacro:virtual_base_system root_link="$(arg root_link)" base_link="$(arg base_name)_base_link"/>
+
+  <!-- Sensors -->
+  <gazebo reference="$(arg base_name)_lidar_front_right_link">
+  <sensor name="lidar_front_right" type="gpu_lidar">
+      <pose relative_to='$(arg base_name)_lidar_front_right_link'>0 0 0 0 0 0</pose>
+      <topic>$(arg robot_name)/lidar_front_right</topic>
+      <gz_frame_id>$(arg base_name)_lidar_front_right_link</gz_frame_id>
+      <!-- Response time 80 ms -->
+      <update_rate>12.5</update_rate>
+      <always_on>1</always_on>
+      <visualize>true</visualize>
+      <ray>
+        <scan>
+          <horizontal>
+              <samples>540</samples>
+              <resolution>1</resolution>
+              <!-- avoid the base -->
+              <min_angle>-2</min_angle>
+              <max_angle>2</max_angle>
+          </horizontal>
+          <vertical>
+              <samples>1</samples>
+              <resolution>0.01</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+          </vertical>
+        </scan>
+        <range>
+            <min>0.05</min>
+            <max>30.0</max>
+            <!-- Resolution (can be configured) 30 mm, 40 mm, 50 mm, 70 mm, 150 mm -->
+            <resolution>0.05</resolution> 
+        </range>
+    </ray>
+  </sensor>
+  </gazebo>
+  <gazebo reference="$(arg base_name)_lidar_back_left_link">
+  <sensor name="lidar_back_left" type="gpu_lidar">
+      <pose relative_to='$(arg base_name)_lidar_back_left_link'>0 0 0 0 0 0</pose>
+      <topic>$(arg robot_name)/lidar_back_left</topic>
+      <gz_frame_id>$(arg base_name)_lidar_back_left_link</gz_frame_id>
+      <!-- Response time 80 ms -->
+      <update_rate>12.5</update_rate>
+      <always_on>1</always_on>
+      <visualize>true</visualize>
+      <ray>
+        <scan>
+          <horizontal>
+              <samples>540</samples>
+              <resolution>1</resolution>
+              <min_angle>-2</min_angle>
+              <max_angle>2</max_angle>
+          </horizontal>
+          <vertical>
+              <samples>1</samples>
+              <resolution>0.01</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+          </vertical>
+        </scan>
+        <range>
+            <min>0.05</min>
+            <max>30.0</max>
+            <!-- Resolution (can be configured) 30 mm, 40 mm, 50 mm, 70 mm, 150 mm -->
+            <resolution>0.05</resolution> 
+        </range>
+    </ray>
+  </sensor>
+  </gazebo>
+
+</robot>

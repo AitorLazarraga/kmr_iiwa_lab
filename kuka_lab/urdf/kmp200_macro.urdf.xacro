@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro">
+  <!-- include helper xacros -->
+  <xacro:include filename="$(find kuka_lab)/urdf/common_materials.xacro"/>
+  <xacro:macro name="kuka_kmp200" params="base_name">
+    
+  <link name="${base_name}_base_link">
+    <inertial>
+    <origin xyz="0 0 0.35" rpy="0 0 0"/>
+    <mass value="397.0"/><inertia
+      ixx="29.36" iyy="54.90" izz="51.84" 
+      ixy="0.0" ixz="0.0" iyz="0.0"/>
+      </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="file://$(find kuka_lab)/meshes/kmp200/base_link.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <xacro:material_kuka_ral_pearly_white/>
+    </visual>
+    <!-- <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="file://$(find kuka_lab)/meshes/kmp200/base_link.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision> -->
+    <collision name="base_collision">
+      <origin xyz="0 0 0.35" rpy="0 0 0"/>
+      <geometry>
+        <box size="1.08 0.63 0.70"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- laser Scanner laserscanner S300 optic-->
+  <joint name="${base_name}_lidar_front_right_joint" type="fixed">
+      <parent link="${base_name}_base_link" />
+      <child link="${base_name}_lidar_front_right_link" />
+      <origin xyz="0.464 -0.256 0.15" rpy="0 0 -0.7854"/>
+  </joint>
+  <link name="${base_name}_lidar_front_right_link"></link>
+
+  <joint name="${base_name}_lidar_back_left_joint" type="fixed">
+      <parent link="${base_name}_base_link" />
+      <child link="${base_name}_lidar_back_left_link" />
+      <origin xyz="-0.464 0.256 0.15" rpy="0 0 2.3562"/>
+  </joint>
+  <link name="${base_name}_lidar_back_left_link"></link>
+  
+
+  </xacro:macro>
+</robot>
