@@ -13,7 +13,7 @@ slam_toolbox:
     odom_frame: "world"
     map_frame: map
     base_frame: kmp_base_link
-    scan_topic: /kmr_iiwa/lidar_front_right
+    scan_topic: /kmr_iiwa/scan
     use_map_saver: true
     mode: localization
 

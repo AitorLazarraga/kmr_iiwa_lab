@@ -15,7 +15,7 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
-
+from launch_ros.actions import Node
 
 def generate_launch_description():
     pkg = get_package_share_directory('kuka_nav')
@@ -43,6 +43,14 @@ def generate_launch_description():
             'slam_params_file': mapper_params,
         }.items(),
         condition=is_mapping,
+    )
+
+    scan_merger = Node(
+        package='kuka_scan_merger',
+        executable='scan_merger',
+        name='scan_merger',
+        output='screen',
+        parameters=[{'use_sim_time': use_sim_time}],
     )
 
     # SLAM Toolbox en modo localización: carga el mapa guardado
@@ -76,6 +84,7 @@ def generate_launch_description():
             'mode', default_value='mapping',
             choices=['mapping', 'localization'],
             description='mapping: construir mapa · localization: usar mapa guardado'),
+        scan_merger,
         slam_mapping,
         slam_localization,
         nav2,

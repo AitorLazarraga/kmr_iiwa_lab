@@ -62,6 +62,16 @@ def generate_launch_description():
     create_robot_description_arg = OpaqueFunction(
         function=create_robot_description
     )
+
+    scan = Node(
+        package="kuka_scan_merger",
+        executable="scan_merger",
+        name="scan_merger",
+        output="screen",
+        parameters=[
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ],
+    )
     
     rviz = Node(
         package="rviz2",
@@ -186,6 +196,7 @@ def generate_launch_description():
         robot_state_publisher,
         spawn_active_controllers,
         spawn_deactive_controllers,
+        scan,
         ros_gz_bridge,
         rviz,
     ])
