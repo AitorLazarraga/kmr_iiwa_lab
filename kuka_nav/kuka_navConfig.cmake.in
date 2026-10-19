@@ -1,0 +1,14 @@
+# - Config file for the kuka_nav package
+# It defines the following variables
+#  kuka_nav_INCLUDE_DIRS - include directories for FooBar
+#  kuka_nav_LIBRARIES    - libraries to link against
+#  kuka_nav_EXECUTABLE   - the bar executable
+
+set(kuka_nav_INCLUDE_DIRS "@CONF_INCLUDE_DIRS@")
+
+# Our library dependencies (contains definitions for IMPORTED targets)
+include("${kuka_nav_DIR}/export_kuka_nav.cmake")
+
+# These are IMPORTED targets created by kuka_navTargets.cmake
+
+
