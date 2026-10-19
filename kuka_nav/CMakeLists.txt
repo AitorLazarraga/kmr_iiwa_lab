@@ -3,6 +3,9 @@ project(kuka_nav)
 
 find_package(ament_cmake REQUIRED)
 
+install(DIRECTORY launch config maps
+  DESTINATION share/${PROJECT_NAME})
+
 install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME})
 

@@ -7,8 +7,7 @@ Panels:
         - /Global Options1
         - /Status1
         - /TF1/Frames1
-        - /LocalMap1/Status1
-        - /LocalMap1/Update Topic1
+        - /CompleteMap1/Update Topic1
       Splitter Ratio: 0.545976996421814
     Tree Height: 535
   - Class: rviz_common/Selection
@@ -125,15 +124,15 @@ Visualization Manager:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        odom:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
         virtual_base_link_x:
           Alpha: 1
           Show Axes: false
           Show Trail: false
         virtual_base_link_y:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        world:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -178,12 +177,12 @@ Visualization Manager:
           Value: true
         map:
           Value: true
-        odom:
-          Value: true
         virtual_base_link_x:
           Value: false
         virtual_base_link_y:
           Value: false
+        world:
+          Value: true
       Marker Scale: 1
       Name: TF
       Show Arrows: true
@@ -192,7 +191,7 @@ Visualization Manager:
       Tree:
         map:
           {}
-        odom:
+        world:
           virtual_base_link_x:
             virtual_base_link_y:
               kmp_base_link:
@@ -287,20 +286,20 @@ Visualization Manager:
       Color Scheme: map
       Draw Behind: false
       Enabled: true
-      Name: LocalMap
+      Name: CompleteMap
       Topic:
         Depth: 5
         Durability Policy: Volatile
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /local_costmap/costmap
+        Value: /map
       Update Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /local_costmap/costmap_updates
+        Value: /map_updates
       Use Timestamp: false
       Value: true
     - Alpha: 0.699999988079071
@@ -409,4 +408,4 @@ Window Geometry:
     collapsed: false
   Width: 1440
   X: 2096
-  Y: 324
+  Y: 204
