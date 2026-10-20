@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>KMR iiwa · Control</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- Barra de estado -->
+  <header class="statusbar">
+    <div class="brand">KMR&nbsp;iiwa</div>
+    <div class="status-items">
+      <div class="st"><span class="dot" id="st-ros"></span><span>ROS</span></div>
+      <div class="st"><span class="dot" id="st-client"></span><span>Cliente</span></div>
+      <div class="st pose">
+        <span class="lbl">X</span><span class="val" id="st-x">—</span>
+        <span class="lbl">Y</span><span class="val" id="st-y">—</span>
+        <span class="lbl">θ</span><span class="val" id="st-th">—</span>
+      </div>
+      <div class="st"><span class="dot" id="st-route"></span><span>Ruta</span>
+        <span class="sub" id="st-route-txt"></span></div>
+    </div>
+    <button class="estop" id="btn-stop" title="Parada (barra espaciadora)">PARADA</button>
+  </header>
+
+  <!-- Barra de emergencias / avisos -->
+  <section class="alertbar">
+    <div class="banner hidden" id="banner"></div>
+    <div class="alerts">
+      <ul id="alert-list"></ul>
+      <button class="ghost small" id="btn-clear-alerts" title="Borrar avisos">Borrar</button>
+    </div>
+  </section>
+
+  <main class="layout">
+
+    <!-- Panel: mapa -->
+    <section class="panel map-panel">
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="Herramienta del mapa">
+          <button class="seg-btn active" data-tool="pan" title="Mover la vista">Mover</button>
+          <button class="seg-btn" data-tool="goal" title="Pulsar y arrastrar para orientar">Poner goal</button>
+        </div>
+        <button class="ghost" id="btn-center">Centrar robot</button>
+        <button class="ghost" id="btn-fit">Ajustar mapa</button>
+        <button class="ghost danger-text" id="btn-clear-goal">Borrar goal</button>
+      </div>
+      <div class="map-wrap">
+        <canvas id="map"></canvas>
+        <div class="map-hint" id="map-hint">Esperando mapa…</div>
+      </div>
+      <div class="goal-info" id="goal-info">Sin goal</div>
+    </section>
+
+    <!-- Panel: teleoperación -->
+    <section class="panel teleop-panel">
+      <h2>Teleoperación</h2>
+
+      <div class="joy-row">
+        <div class="joy-block">
+          <div class="joy" id="joy-xy">
+            <div class="joy-forbidden">sin marcha atrás</div>
+            <div class="joy-knob"></div>
+          </div>
+          <div class="joy-label">Avance / lateral</div>
+        </div>
+
+        <div class="joy-block rot-block">
+          <div class="slider" id="joy-rot"><div class="slider-knob"></div></div>
+          <div class="joy-label">Giro</div>
+        </div>
+      </div>
+
+      <div class="speed">
+        <span>Velocidad</span>
+        <div class="seg" role="group" aria-label="Escala de velocidad">
+          <button class="seg-btn" data-speed="0.25">25%</button>
+          <button class="seg-btn active" data-speed="0.5">50%</button>
+          <button class="seg-btn" data-speed="1">100%</button>
+        </div>
+      </div>
+
+      <div class="cmd-readout">
+        <div><span>vx</span><b id="cmd-vx">0.00</b><small>m/s</small></div>
+        <div><span>vy</span><b id="cmd-vy">0.00</b><small>m/s</small></div>
+        <div><span>wz</span><b id="cmd-wz">0.00</b><small>rad/s</small></div>
+      </div>
+
+      <p class="keys">Teclado: <kbd>W</kbd> avanzar · <kbd>A</kbd>/<kbd>D</kbd> lateral ·
+        <kbd>Q</kbd>/<kbd>E</kbd> girar · <kbd>Espacio</kbd> parada</p>
+    </section>
+
+  </main>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

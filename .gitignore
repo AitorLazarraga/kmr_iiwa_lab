@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 *.egg-info/
+.venv/
+logs/
 
 # colcon
 build/
@@ -14,3 +16,5 @@ log/
 *.swp
 .DS_Store
 EOF
+.obsidian/
+.obisidian

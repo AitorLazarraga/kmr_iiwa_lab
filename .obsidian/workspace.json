@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "README.md",
-                "mode": "source",
-                "source": false
+                "file": "docs/ROADMAP.md",
+                "mode": "preview",
+                "source": true
               },
               "icon": "lucide-file",
-              "title": "README"
+              "title": "ROADMAP"
             }
           }
         ]
@@ -190,6 +190,12 @@
   },
   "active": "94e82b4accd0d64e",
   "lastOpenFiles": [
+    "docs/atornillador_arquitectura.md",
+    "docs/ROADMAP.md",
+    "ROADMAP.md",
+    "docs/Unconfirmed 275120.crdownload",
+    "README.md",
+    "file:/home/idlab/Descargas/atornillador_arquitectura.md",
     "kuka_nav/launch/Unconfirmed 271294.crdownload",
     "kuka_nav/config/localizer_params.yaml",
     "kuka_nav/maps/test_obstacles.data",
