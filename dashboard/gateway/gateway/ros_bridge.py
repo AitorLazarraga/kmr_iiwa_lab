@@ -120,6 +120,10 @@ class RosBridge(Node):
         with self._lock:
             self._events.append(event)
 
+    def emit(self, level, code, message):
+        """Evento público para la barra de avisos de todos los clientes."""
+        self._emit(level, code, message)
+
     def get_events_since(self, last_id):
         with self._lock:
             return [e for e in self._events if e['id'] > last_id]
@@ -257,6 +261,14 @@ class RosBridge(Node):
         log.warning('PARADA solicitada por %s', who)
         self._emit('emergency', 'stop', f'PARADA solicitada ({who})')
         self.cancel_goal(who)
+        self._publish_twist(0.0, 0.0, 0.0)
+        self._teleop_active = False
+
+    def halt_teleop(self, who='?'):
+        """Para la teleoperación en curso sin tocar la navegación (p. ej. al
+        cambiar el control de operador)."""
+        if self._teleop_active:
+            log.info('Teleop detenida (%s)', who)
         self._publish_twist(0.0, 0.0, 0.0)
         self._teleop_active = False
 

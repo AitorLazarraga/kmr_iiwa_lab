@@ -22,6 +22,15 @@
       <div class="st"><span class="dot" id="st-route"></span><span>Ruta</span>
         <span class="sub" id="st-route-txt"></span></div>
     </div>
+    <div class="control-box">
+      <div class="st"><span class="dot" id="st-control"></span>
+        <span id="control-txt">Control libre</span></div>
+      <button class="ghost" id="btn-control">Tomar control</button>
+    </div>
+    <div class="user-box">
+      <span class="user-chip" id="user-chip">—</span>
+      <button class="ghost small" id="btn-logout" title="Cerrar sesión">Salir</button>
+    </div>
     <button class="estop" id="btn-stop" title="Parada (barra espaciadora)">PARADA</button>
   </header>
 
@@ -57,6 +66,7 @@
     <!-- Panel: teleoperación -->
     <section class="panel teleop-panel">
       <h2>Teleoperación</h2>
+      <p class="no-control-note" id="no-control-note">Pulsa «Tomar control» para mover el robot.</p>
 
       <div class="joy-row">
         <div class="joy-block">
@@ -93,6 +103,21 @@
     </section>
 
   </main>
+
+  <!-- Inicio de sesión -->
+  <div class="login-overlay" id="login" hidden>
+    <form class="login-card" id="login-form" autocomplete="on">
+      <div class="login-title">KMR iiwa · Control</div>
+      <label>Usuario
+        <input name="username" id="login-user" autocomplete="username" required autofocus>
+      </label>
+      <label>Contraseña
+        <input name="password" id="login-pass" type="password" autocomplete="current-password" required>
+      </label>
+      <div class="login-error" id="login-error"></div>
+      <button type="submit" class="primary" id="login-btn">Entrar</button>
+    </form>
+  </div>
 
   <script type="module" src="js/main.js"></script>
 </body>

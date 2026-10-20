@@ -62,6 +62,19 @@ SCAN_DOWNSAMPLE = int(_env('SCAN_DOWNSAMPLE', '3'))  # 1 de cada N haces
 # --- Log --------------------------------------------------------------------
 LOG_FILE = _env('LOG_FILE', 'logs/gateway.log')
 
+# --- Usuarios y control -----------------------------------------------------
+# Base de datos SQLite (no se sube a Git: está en data/, ignorado).
+DB_PATH = _env('DB_PATH', 'data/gateway.db')
+SESSION_HOURS = _env_float('SESSION_HOURS', 12.0)
+# Con nginx + HTTPS (paso 2.6) poner COOKIE_SECURE=true.
+COOKIE_SECURE = _env_bool('COOKIE_SECURE', False)
+# Intentos de login fallidos permitidos por IP en LOGIN_WINDOW segundos.
+LOGIN_MAX_FAILS = int(_env('LOGIN_MAX_FAILS', '5'))
+LOGIN_WINDOW = _env_float('LOGIN_WINDOW', 60.0)
+# Tiempo que se reserva el control a un operador desconectado para que pueda
+# recuperarlo con la misma sesión (p. ej. corte de WiFi).
+CONTROL_GRACE = _env_float('CONTROL_GRACE', 5.0)
+
 # --- Frontend ---------------------------------------------------------------
 # Durante el desarrollo el propio gateway sirve la web (en el paso 2.6 lo hará
 # nginx). Por defecto: dashboard/web, al lado de dashboard/gateway.

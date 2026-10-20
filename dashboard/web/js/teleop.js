@@ -16,6 +16,7 @@ export class Teleop {
     this.rot = { x: 0, active: false };
     this.keys = new Set();
     this.timer = null;
+    this.enabled = false;           // solo con el control del robot
 
     this._bindJoystick(joyEl);
     this._bindSlider(rotEl);
@@ -23,6 +24,17 @@ export class Teleop {
   }
 
   setLimits(limits) { this.limits = limits; }
+
+  /** Activa o desactiva los mandos. Al desactivar, suelta todo y manda cero. */
+  setEnabled(enabled) {
+    if (enabled === this.enabled) return;
+    this.enabled = enabled;
+    if (!enabled) {
+      const wasMoving = this.timer !== null;
+      this.releaseAll();
+      if (wasMoving) this.send({ type: 'teleop', vx: 0, vy: 0, wz: 0 });
+    }
+  }
   setScale(scale) { this.scale = scale; }
 
   /** Suelta todos los controles sin mandar nada (tras una PARADA). */
@@ -97,6 +109,7 @@ export class Teleop {
       this._renderJoy();
     };
     el.addEventListener('pointerdown', (e) => {
+      if (!this.enabled) return;
       el.setPointerCapture(e.pointerId);
       this.joy.active = true; el.classList.add('active');
       move(e); this._update();
@@ -129,6 +142,7 @@ export class Teleop {
       this._renderRot();
     };
     el.addEventListener('pointerdown', (e) => {
+      if (!this.enabled) return;
       el.setPointerCapture(e.pointerId);
       this.rot.active = true; el.classList.add('active');
       move(e); this._update();
@@ -155,7 +169,7 @@ export class Teleop {
     window.addEventListener('keydown', (e) => {
       if (e.target.closest('input, textarea, select')) return;
       const k = e.key.toLowerCase();
-      if (TELEOP_KEYS.includes(k) && !e.repeat) {
+      if (this.enabled && TELEOP_KEYS.includes(k) && !e.repeat) {
         this.keys.add(k); this._update();
       }
     });

@@ -14,7 +14,7 @@
               "type": "markdown",
               "state": {
                 "file": "docs/ROADMAP.md",
-                "mode": "preview",
+                "mode": "source",
                 "source": true
               },
               "icon": "lucide-file",
@@ -190,19 +190,21 @@
   },
   "active": "94e82b4accd0d64e",
   "lastOpenFiles": [
+    "dashboard/gateway/data/prueba.db-shm",
+    "dashboard/gateway/data/prueba.db-wal",
+    "dashboard/gateway/data/prueba.db-journal",
+    "dashboard/gateway/data/prueba.db",
+    "dashboard/gateway/data/gateway.db-shm",
+    "dashboard/gateway/data/gateway.db-wal",
+    "dashboard/gateway/gateway/__pycache__/control.cpython-312.pyc",
+    "dashboard/gateway/data/gateway.db",
+    "dashboard/gateway/data/gateway.db-journal",
+    "dashboard/gateway/data",
+    "dashboard/gateway/gateway/__pycache__/db.cpython-312.pyc",
     "docs/atornillador_arquitectura.md",
     "docs/ROADMAP.md",
     "ROADMAP.md",
-    "docs/Unconfirmed 275120.crdownload",
     "README.md",
-    "file:/home/idlab/Descargas/atornillador_arquitectura.md",
-    "kuka_nav/launch/Unconfirmed 271294.crdownload",
-    "kuka_nav/config/localizer_params.yaml",
-    "kuka_nav/maps/test_obstacles.data",
-    "kuka_nav/maps/test_obstacles.posegraph",
-    "kuka_nav/maps/test_obstacles.yaml",
-    "kuka_nav/maps/test_obstacles.pgm",
-    "kuka_nav/maps",
-    "kuka_nav/map"
+    "file:/home/idlab/Descargas/atornillador_arquitectura.md"
   ]
 }

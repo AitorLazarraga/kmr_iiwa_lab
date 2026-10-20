@@ -144,12 +144,51 @@ button { font: inherit; color: inherit; cursor: pointer; }
 kbd { font-family: var(--mono); background: var(--panel-2); border: 1px solid var(--line);
   border-radius: 4px; padding: 0 4px; }
 
+/* ---------- Control y usuario ---------- */
+.control-box, .user-box { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.dot.mine { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.dot.other { background: var(--warn); }
+.dot.away { background: var(--warn); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .2; } }
+#btn-control.has { border-color: var(--ok); color: #9be6bd; }
+#btn-control:disabled { opacity: .45; cursor: not-allowed; }
+.user-chip { color: var(--muted); font-size: 13px; }
+.user-chip b { color: var(--text); font-weight: 600; }
+
+/* Sin control: los mandos de movimiento se atenúan (la PARADA nunca) */
+body.no-control .teleop-panel .joy-row,
+body.no-control .teleop-panel .speed,
+body.no-control [data-tool="goal"],
+body.no-control #btn-clear-goal { opacity: .35; pointer-events: none; filter: grayscale(1); }
+.no-control-note { display: none; margin: 0 14px; padding: 6px 10px; border-radius: 8px;
+  background: var(--panel-2); color: var(--muted); font-size: 12px; }
+body.no-control .no-control-note { display: block; }
+
+/* ---------- Login ---------- */
+.login-overlay { position: fixed; inset: 0; background: #0b0d10ee; display: grid;
+  place-items: center; z-index: 100; padding: 16px; }
+.login-overlay[hidden] { display: none; }
+.login-card { width: min(360px, 100%); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+.login-title { font-weight: 700; font-size: 18px; letter-spacing: .03em; }
+.login-card label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; }
+.login-card input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 12px; }
+.login-card input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.login-error { color: #ff9a9d; min-height: 1.2em; font-size: 13px; }
+.primary { background: var(--accent); border: 0; color: #fff; font-weight: 600;
+  border-radius: 8px; padding: 11px; }
+.primary:disabled { opacity: .6; }
+
 /* ---------- Móvil ---------- */
 @media (max-width: 900px) {
-  .layout { grid-template-columns: 1fr; grid-template-rows: minmax(260px, 1fr) auto; overflow-y: auto; }
+  .layout { display: flex; flex-direction: column; overflow-y: auto; }
+  .layout > .panel { flex: none; }
   .statusbar { flex-wrap: wrap; gap: 8px; }
   .brand { display: none; }
   .estop { order: -1; width: 100%; padding: 12px; font-size: 18px; }
+  .control-box { flex: 1; justify-content: space-between; }
+  .map-wrap { flex: none; height: 55vh; }
   .keys { display: none; }
   .joy { --size: 150px; }
 }
