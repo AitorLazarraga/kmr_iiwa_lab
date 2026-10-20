@@ -261,10 +261,51 @@ kmr_iiwa_lab/
 
 ## 8. Puesta en marcha rápida
 
+**Importante** Para realizar el clone debera haber una clave SSH configurada y con permisos para el repositorio
+
 ```bash
-# Instalación
+ssh-keygen -t ed25519 -f ~/.ssh/kmr_iiwa_lab_deploy -N "" -C "pc-laboratorio"
+cat ~/.ssh/kmr_iiwa_lab_deploy.pub
+# GitHub → repositorio → Settings → Deploy keys → Add deploy key (sin "Allow write access")
+
+cat >> ~/.ssh/config << 'EOF'
+Host github-kmr
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/kmr_iiwa_lab_deploy
+  IdentitiesOnly yes
+EOF
+
+git clone git@github-kmr:<USUARIO>/kmr_iiwa_lab.git
+
+```
+
+**Configuración del ordenador por primera vez**
+
+```bash
+sudo apt install ros-dev-tools python3-vcstool
+sudo rosdep init        # solo si nunca se ha hecho en esta máquina
+rosdep update
+echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
+
+**Configuración para el dashboard**
+
+```bash
+cd ~/ros2_ws/src/kmr_iiwa_lab/dashboard/gateway
+sudo apt install python3-venv
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+**Descarga del repositorio**
+
+```bash
+source /opt/ros/jazzy/setup.bash          # imprescindible antes de colcon
 mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
-git clone https://github.com/AitorLazarraga/kmr_iiwa_lab.git
+git clone https://github.com/AitorLazarraga/kmr_iiwa_lab
 vcs import . < kmr_iiwa_lab/dependencies.repos
 cd ~/ros2_ws
 rosdep install --from-paths src -i -r -y
