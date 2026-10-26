@@ -39,6 +39,10 @@ NAV_ACTION = _env('NAV_ACTION', '/navigate_to_pose')
 MAP_FRAME = _env('MAP_FRAME', 'map')
 BASE_FRAME = _env('BASE_FRAME', 'kmp_base_link')
 
+# Nombre del mapa con el que trabaja el gateway. Los puntos y rutas guardados
+# pertenecen a un mapa: si se carga otro mapa en Nav2, lanzar con MAP_NAME=otro.
+MAP_NAME = _env('MAP_NAME', 'laboratorio')
+
 # --- Seguridad del movimiento ---------------------------------------------
 # Límites de teleoperación. Una orden por encima se RECHAZA (no se recorta).
 MAX_VX = _env_float('MAX_VX', 0.5)    # m/s

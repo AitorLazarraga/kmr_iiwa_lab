@@ -1,14 +1,26 @@
 """Parte web del gateway: FastAPI + WebSocket + web estática.
 
 API HTTP
-  POST   /api/login          {username, password} -> cookie de sesión
+  POST   /api/login             {username, password} -> cookie de sesión
   POST   /api/logout
   GET    /api/me
-  GET    /api/users          (admin)
-  POST   /api/users          (admin) {username, password, role}
-  PATCH  /api/users/{id}     (admin) {role?, active?, password?}
-  DELETE /api/users/{id}     (admin)
+  GET    /api/users             (admin)
+  POST   /api/users             (admin) {username, password, role}
+  PATCH  /api/users/{id}        (admin) {role?, active?, password?}
+  DELETE /api/users/{id}        (admin)
   GET    /api/health
+
+  Puntos y rutas (del mapa activo cfg.MAP_NAME salvo ?map=<nombre> en los GET)
+  GET    /api/points            ?map=
+  POST   /api/points            (operador) {name, x, y, yaw}
+  PATCH  /api/points/{id}       (operador) {name?, x?, y?, yaw?}
+  DELETE /api/points/{id}       (operador)  -> quita el punto de las rutas que lo usan
+  GET    /api/routes            ?map=
+  GET    /api/routes/{id}
+  POST   /api/routes            (operador) {name, stops: [{point_id, wait_s}, ...]}
+  PATCH  /api/routes/{id}       (operador) {name?, stops?}  (stops sustituye todas)
+  DELETE /api/routes/{id}       (operador)
+  Cualquier cambio emite un evento 'points_changed' para que los clientes recarguen.
 
 WebSocket /ws (requiere sesión; se cierra con código 4401 si no la hay)
 
@@ -35,20 +47,24 @@ import asyncio
 import itertools
 import json
 import logging
+import math
 import os
+import sqlite3
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from . import auth
 from . import config as cfg
 from .control import Client, ControlDenied, ControlManager
 from .db import Database
 from .ros_bridge import CommandRejected, start_ros, stop_ros
+
+
 
 log = logging.getLogger('gateway.web')
 
@@ -61,6 +77,83 @@ _client_ids = itertools.count(1)
 
 WS_CLOSE_AUTH = 4401
 
+class PointIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    x: float
+    y: float
+    yaw: float = 0.0
+
+    @field_validator('name')
+    @classmethod
+    def clean_name(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError('el nombre no puede estar vacío')
+        return v
+
+    @field_validator('x', 'y', 'yaw')
+    @classmethod
+    def finite(cls, v):
+        if not math.isfinite(v):
+            raise ValueError('debe ser un número finito')
+        return v
+
+class PointPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    x: float | None = None
+    y: float | None = None
+    yaw: float | None = None
+
+    @field_validator('name')
+    @classmethod
+    def clean_name(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("No se pueden ingresar nombres vacios")
+        return v
+
+    @field_validator('x', 'y', 'yaw')
+    @classmethod
+    def finite(cls,v):
+        if v is None:
+            return v
+        if not math.isfinite(v):
+            raise ValueError('Debe ser un numero finito')
+        return v
+
+class RouteStop(BaseModel):
+    point_id: int
+    # ge/le ya rechazan NaN e infinitos: no hace falta validador propio
+    wait_s: float = Field(default=0.0, ge=0, le=600)
+
+class RoutePatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    stops: list[RouteStop] | None = Field(default=None, min_length=1, max_length=50)
+    
+    @field_validator('name')
+    @classmethod
+    def clean_name(cls,v):
+        if v is None:
+            return v
+        v = v.strip()
+        
+        if not v:
+            raise ValueError("No se pueden ingresar nombres vacios")
+        return v
+
+class RouteIn(BaseModel):
+    name : str = Field(min_length=1, max_length=40)
+    stops : list[RouteStop] = Field(min_length=1, max_length=50)
+
+    @field_validator('name')
+    @classmethod
+    def clean_name(cls,v):
+        v = v.strip()
+        if not v:
+            raise ValueError("No se pueden ingresar nombres vacios")
+        return v
 
 def setup_logging():
     os.makedirs(os.path.dirname(cfg.LOG_FILE) or '.', exist_ok=True)
@@ -162,6 +255,11 @@ def admin_user(user=Depends(current_user)):
         raise HTTPException(403, 'solo administradores')
     return user
 
+def operator_user(user=Depends(current_user)):
+    if auth.ROLES[user['role']] < auth.ROLES['operator']:
+        raise HTTPException(403, 'se necesita rol de operador o superior')
+    return user
+
 
 def public_user(u):
     return {k: u[k] for k in ('id', 'username', 'role', 'active', 'created_at', 'last_login')
@@ -242,7 +340,7 @@ async def users_create(body: UserIn, admin=Depends(admin_user)):
         uid = db.create_user(body.username.strip(), auth.hash_password(body.password), body.role)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    except Exception as e:  # sqlite3.IntegrityError: usuario repetido
+    except sqlite3.IntegrityError as e: 
         raise HTTPException(409, 'ese usuario ya existe') from e
     log.info('USUARIO creado por %s: %s (%s)', admin['username'], body.username, body.role)
     return public_user(db.get_user(uid))
@@ -282,6 +380,140 @@ async def users_delete(user_id: int, admin=Depends(admin_user)):
     await close_user_sockets(user_id)
     db.delete_user(user_id)
     log.info('USUARIO %s borrado por %s', target['username'], admin['username'])
+    return {'ok': True}
+
+# ---------------------------------------------------------------- puntos
+@app.post('/api/points', status_code=201)
+async def points_create(body: PointIn, user=Depends(operator_user)):
+    try:
+        pid = db.create_point(body.name, cfg.MAP_NAME, body.x, body.y, body.yaw, user['id'])
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, f'ya existe un punto llamado {body.name!r} en este mapa')
+    log.info('PUNTO creado por %s: %s (%.2f, %.2f)', user['username'], body.name, body.x, body.y)
+    bridge.emit('info', 'points_changed', f'{user["username"]} ha creado el punto {body.name}')
+    return db.get_point(pid)
+
+@app.get('/api/points')
+async def get_points(map:str | None = None, user=Depends(current_user)):
+    return db.list_points(map or cfg.MAP_NAME)
+
+@app.patch('/api/points/{point_id}')
+async def change_points(point_id:int, body: PointPatch, user=Depends(operator_user)):
+    target = db.get_point(point_id)
+    if target is None:
+        raise HTTPException(404, 'Point not Found')
+    changes = body.model_dump(exclude_unset=True, exclude_none=True)
+    if not changes:
+        raise HTTPException(400, 'No datos de cambio')
+    try:
+        db.update_point(point_id, **changes)
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, 'Ya existe un punto con este nombre')
+    
+    log.info('PUNTO %s modificado por %s: %s', target['name'], user['username'], changes)
+    bridge.emit('info', 'points_changed',
+                f'{user["username"]} ha modificado el punto {changes.get("name", target["name"])}')
+    return db.get_point(point_id)
+
+@app.delete('/api/points/{point_id}')
+async def points_delete(point_id: int, user=Depends(operator_user)):
+    target = db.get_point(point_id)
+    if target is None:
+        raise HTTPException(404, 'punto no encontrado')
+    affected = db.routes_using_point(point_id)          # antes de borrar
+    db.delete_point(point_id)
+    modified = [r['name'] for r in affected]
+    emptied = [r['name'] for r in affected if not db.get_route(r['id'])['executable']]
+
+    message = f'{user["username"]} ha borrado el punto {target["name"]}'
+    if modified:
+        message += f'; rutas modificadas: {", ".join(modified)}'
+    if emptied:
+        message += f'. Han quedado VACÍAS: {", ".join(emptied)}'
+    log.info('PUNTO borrado: %s', message)
+    bridge.emit('warning' if emptied else 'info', 'points_changed', message)
+    return {'ok': True, 'routes_modified': modified, 'routes_emptied': emptied}
+
+
+# ---------------------------------------------------------------- rutas
+def check_stops(stops):
+    """Comprueba que todos los puntos existen y son del mapa activo.
+    Devuelve la lista [(point_id, wait_s), ...] que espera la base de datos."""
+    ids = {s.point_id for s in stops}
+    valid = {p['id'] for p in db.list_points(cfg.MAP_NAME)}
+    missing = ids - valid
+    if missing:
+        raise HTTPException(400, f'puntos inexistentes o de otro mapa: {sorted(missing)}')
+    return [(s.point_id, s.wait_s) for s in stops]
+
+
+def describe_route(route):
+    n = len(route['stops'])
+    return f'{route["name"]} ({n} parada{"" if n == 1 else "s"})'
+
+
+@app.get('/api/routes')
+async def routes_list(map: str | None = None, user=Depends(current_user)):
+    return db.list_routes(map or cfg.MAP_NAME)
+
+
+@app.get('/api/routes/{route_id}')
+async def routes_get(route_id: int, user=Depends(current_user)):
+    route = db.get_route(route_id)
+    if route is None:
+        raise HTTPException(404, 'ruta no encontrada')
+    return route
+
+
+@app.post('/api/routes', status_code=201)
+async def routes_create(body: RouteIn, user=Depends(operator_user)):
+    stops = check_stops(body.stops)
+    try:
+        rid = db.create_route(body.name, cfg.MAP_NAME, stops, user['id'])
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, f'ya existe una ruta llamada {body.name!r} en este mapa')
+    route = db.get_route(rid)
+    log.info('RUTA creada por %s: %s', user['username'], describe_route(route))
+    bridge.emit('info', 'points_changed',
+                f'{user["username"]} ha creado la ruta {describe_route(route)}')
+    return route
+
+
+@app.patch('/api/routes/{route_id}')
+async def routes_update(route_id: int, body: RoutePatch, user=Depends(operator_user)):
+    target = db.get_route(route_id)
+    if target is None:
+        raise HTTPException(404, 'ruta no encontrada')
+    if body.name is None and body.stops is None:
+        raise HTTPException(400, 'no hay cambios')
+    stops = check_stops(body.stops) if body.stops is not None else None
+    try:
+        db.update_route(route_id, name=body.name, stops=stops)
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, f'ya existe una ruta llamada {body.name!r} en este mapa')
+    route = db.get_route(route_id)
+
+    changed = []
+    if body.name is not None and body.name != target['name']:
+        changed.append(f'nombre {target["name"]} -> {body.name}')
+    if stops is not None:
+        changed.append(f'paradas {len(target["stops"])} -> {len(route["stops"])}')
+    log.info('RUTA %s modificada por %s: %s', target['name'], user['username'],
+             ', '.join(changed) or 'sin cambios efectivos')
+    bridge.emit('info', 'points_changed',
+                f'{user["username"]} ha modificado la ruta {route["name"]}')
+    return route
+
+
+@app.delete('/api/routes/{route_id}')
+async def routes_delete(route_id: int, user=Depends(operator_user)):
+    target = db.get_route(route_id)
+    if target is None:
+        raise HTTPException(404, 'ruta no encontrada')
+    db.delete_route(route_id)
+    log.info('RUTA borrada por %s: %s', user['username'], describe_route(target))
+    bridge.emit('info', 'points_changed',
+                f'{user["username"]} ha borrado la ruta {target["name"]}')
     return {'ok': True}
 
 
@@ -391,6 +623,8 @@ def handle_command(msg, client: Client):
         bridge.cancel_goal(who=who)
     else:
         raise CommandRejected(f'tipo de mensaje desconocido: {kind!r}')
+
+    
 
 
 @app.websocket('/ws')
