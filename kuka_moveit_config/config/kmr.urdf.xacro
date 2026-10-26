@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="kmr">
+    <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
+
+    <!-- Import kmr urdf file -->
+    <xacro:include filename="$(find kuka_lab)/urdf/kmr_iiwa.urdf.xacro" />
+
+    <!-- Import control_xacro -->
+    <xacro:include filename="kmr.ros2_control.xacro" />
+
+
+    <xacro:kmr_ros2_control name="FakeSystem" initial_positions_file="$(arg initial_positions_file)"/>
+
+</robot>

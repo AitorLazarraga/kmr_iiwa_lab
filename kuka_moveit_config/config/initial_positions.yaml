@@ -1,0 +1,10 @@
+# Default initial positions for kmr's ros2_control fake system
+
+initial_positions:
+  kmr_iiwa_A1: 0
+  kmr_iiwa_A2: 0
+  kmr_iiwa_A3: 0
+  kmr_iiwa_A4: 0
+  kmr_iiwa_A5: 0
+  kmr_iiwa_A6: 0
+  kmr_iiwa_A7: 0

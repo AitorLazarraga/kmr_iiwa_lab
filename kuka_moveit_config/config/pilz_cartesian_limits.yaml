@@ -1,0 +1,8 @@
+# Límites cartesianos del planificador Pilz (LIN / CIRC).
+# Conservadores: el robot trabaja cerca de paredes y personas. Las peticiones
+# pueden escalarse además con max_velocity_scaling_factor.
+cartesian_limits:
+  max_trans_vel: 0.5     # m/s
+  max_trans_acc: 1.0     # m/s²
+  max_trans_dec: -1.0    # m/s²
+  max_rot_vel: 1.0       # rad/s

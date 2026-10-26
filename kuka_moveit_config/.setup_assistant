@@ -1,0 +1,26 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: kuka_lab
+    relative_path: urdf/kmr_iiwa.urdf.xacro
+    xacro_args: root_link:=world
+  srdf:
+    relative_path: config/kmr.srdf
+  package_settings:
+    author_name: Aitor L
+    author_email: aitor.lazper@gmail.com
+    generated_timestamp: 1793023290
+  control_xacro:
+    command:
+      - position
+    state:
+      - position
+      - velocity
+  modified_urdf:
+    xacros:
+      - control_xacro
+  control_xacro:
+    command:
+      - position
+    state:
+      - position
+      - velocity

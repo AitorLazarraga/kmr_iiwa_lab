@@ -1,0 +1,26 @@
+# MoveIt uses this configuration for controller management
+
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - joint_trajectory_controller
+
+  joint_trajectory_controller:
+    type: FollowJointTrajectory
+    joints:
+      - kmr_iiwa_A1
+      - kmr_iiwa_A2
+      - kmr_iiwa_A3
+      - kmr_iiwa_A4
+      - kmr_iiwa_A5
+      - kmr_iiwa_A6
+      - kmr_iiwa_A7
+    action_ns: follow_joint_trajectory
+    default: true
+
+# Ejecución de trayectorias
+trajectory_execution:
+  allowed_execution_duration_scaling: 1.5   # margen: Gazebo puede ir más lento que tiempo real
+  allowed_goal_duration_margin: 1.0
+  allowed_start_tolerance: 0.02             # rad; el brazo cede un poco con la herramienta

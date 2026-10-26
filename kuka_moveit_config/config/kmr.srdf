@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--This does not replace URDF, and is not an extension of URDF.
+    This is a format for representing semantic information about the robot structure.
+    A URDF file must exist for this robot as well, where the joints and the links that are referenced are defined
+-->
+<robot name="kmr">
+    <!--GROUPS: Representation of a set of joints and links. This can be useful for specifying DOF to plan for, defining arms, end effectors, etc-->
+    <!--LINKS: When a link is specified, the parent joint of that link (if it exists) is automatically included-->
+    <!--JOINTS: When a joint is specified, the child link of that joint (which will always exist) is automatically included-->
+    <!--CHAINS: When a chain is specified, all the links along the chain (including endpoints) are included in the group. Additionally, all the joints that are parents to included links are also included. This means that joints along the chain and the parent joint of the base link are included in the group-->
+    <!--SUBGROUPS: Groups can also be formed by referencing to already defined group names-->
+    <group name="arm">
+        <chain base_link="kmr_iiwa_link_0" tip_link="kmr_iiwa_tool_tcp"/>
+    </group>
+    <group name="tool">
+        <link name="kmr_iiwa_tool_link"/>
+        <link name="kmr_iiwa_tool_kds_link"/>
+        <link name="kmr_iiwa_tool_tcp"/>
+    </group>
+    <!--GROUP STATES: Purpose: Define a named state for a particular group, in terms of joint values. This is useful to define states like 'folded arms'-->
+    <group_state name="save" group="arm">
+        <joint name="kmr_iiwa_A1" value="0"/>
+        <joint name="kmr_iiwa_A2" value="0"/>
+        <joint name="kmr_iiwa_A3" value="0"/>
+        <joint name="kmr_iiwa_A4" value="0"/>
+        <joint name="kmr_iiwa_A5" value="0"/>
+        <joint name="kmr_iiwa_A6" value="0"/>
+        <joint name="kmr_iiwa_A7" value="0"/>
+    </group_state>
+    <group_state name="home" group="arm">
+        <joint name="kmr_iiwa_A1" value="1.59"/>
+        <joint name="kmr_iiwa_A2" value="-0.6595"/>
+        <joint name="kmr_iiwa_A3" value="-2.88"/>
+        <joint name="kmr_iiwa_A4" value="-1.1686"/>
+        <joint name="kmr_iiwa_A5" value="-0.2787"/>
+        <joint name="kmr_iiwa_A6" value="1.2149"/>
+        <joint name="kmr_iiwa_A7" value="0.4894"/>
+    </group_state>
+    <!--END EFFECTOR: Purpose: Represent information about an end effector.-->
+    <end_effector name="Atornillador" parent_link="kmr_iiwa_link_ee" group="tool" parent_group="arm"/>
+    <!--PASSIVE JOINT: Purpose: this element is used to mark joints that are not actuated-->
+    <passive_joint name="virtual_joint_x"/>
+    <passive_joint name="virtual_joint_y"/>
+    <passive_joint name="virtual_joint_yaw"/>
+    <!-- Revisado a mano: se vuelven a comprobar las colisiones herramienta ↔ link_3..link_6.
+         El muestreo no las encontró, pero con A6 muy doblado la herramienta (340 mm)
+         puede alcanzar el antebrazo. Es más barato comprobarlo que arriesgarse. -->
+    <!--DISABLE COLLISIONS: By default it is assumed that any link of the robot could potentially come into collision with any other link in the robot. This tag disables collision checking between a specified pair of links. -->
+    <disable_collisions link1="kmp_base_link" link2="kmr_iiwa_link_0" reason="Adjacent"/>
+    <disable_collisions link1="kmp_base_link" link2="kmr_iiwa_link_1" reason="Never"/>
+    <disable_collisions link1="kmp_base_link" link2="kmr_iiwa_link_2" reason="Never"/>
+    <disable_collisions link1="kmp_base_link" link2="kmr_iiwa_link_3" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_0" link2="kmr_iiwa_link_1" reason="Adjacent"/>
+    <disable_collisions link1="kmr_iiwa_link_0" link2="kmr_iiwa_link_2" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_0" link2="kmr_iiwa_link_3" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_0" link2="kmr_iiwa_link_4" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_1" link2="kmr_iiwa_link_2" reason="Adjacent"/>
+    <disable_collisions link1="kmr_iiwa_link_1" link2="kmr_iiwa_link_3" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_1" link2="kmr_iiwa_link_4" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_1" link2="kmr_iiwa_link_5" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_1" link2="kmr_iiwa_link_6" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_1" link2="kmr_iiwa_link_7" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_2" link2="kmr_iiwa_link_3" reason="Adjacent"/>
+    <disable_collisions link1="kmr_iiwa_link_2" link2="kmr_iiwa_link_4" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_2" link2="kmr_iiwa_link_5" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_2" link2="kmr_iiwa_link_6" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_2" link2="kmr_iiwa_link_7" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_3" link2="kmr_iiwa_link_4" reason="Adjacent"/>
+    <disable_collisions link1="kmr_iiwa_link_3" link2="kmr_iiwa_link_5" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_3" link2="kmr_iiwa_link_6" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_3" link2="kmr_iiwa_link_7" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_4" link2="kmr_iiwa_link_5" reason="Adjacent"/>
+    <disable_collisions link1="kmr_iiwa_link_4" link2="kmr_iiwa_link_6" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_4" link2="kmr_iiwa_link_7" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_5" link2="kmr_iiwa_link_6" reason="Adjacent"/>
+    <disable_collisions link1="kmr_iiwa_link_5" link2="kmr_iiwa_link_7" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_6" link2="kmr_iiwa_link_7" reason="Adjacent"/>
+    <disable_collisions link1="kmr_iiwa_link_7" link2="kmr_iiwa_tool_kds_link" reason="Never"/>
+    <disable_collisions link1="kmr_iiwa_link_7" link2="kmr_iiwa_tool_link" reason="Adjacent"/>
+    <disable_collisions link1="kmr_iiwa_tool_kds_link" link2="kmr_iiwa_tool_link" reason="Adjacent"/>
+</robot>
