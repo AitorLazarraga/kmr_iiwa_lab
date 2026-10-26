@@ -22,6 +22,13 @@ API HTTP
   DELETE /api/routes/{id}       (operador)
   Cualquier cambio emite un evento 'points_changed' para que los clientes recarguen.
 
+  Posturas del brazo (7 ángulos en rad, orden A1..A7)
+  GET    /api/arm/poses
+  POST   /api/arm/poses         (operador) {name, positions?}  sin positions = postura actual
+  PATCH  /api/arm/poses/{id}    (operador) {name?, positions?}
+  DELETE /api/arm/poses/{id}    (operador)
+  Los cambios emiten 'arm_poses_changed'.
+
   Cámara del brazo (cualquier usuario con sesión)
   GET    /api/camera/arm.mjpg   vídeo MJPEG (multipart/x-mixed-replace), para un <img>
   GET    /api/camera/arm.jpg    último fotograma
@@ -46,6 +53,10 @@ WebSocket /ws (requiere sesión; se cierra con código 4401 si no la hay)
     {"type": "goal", "x", "y", "yaw"}                                  requiere control
     {"type": "cancel"}                                                 requiere control
     {"type": "run_route", "route_id"}                                  requiere control
+    {"type": "arm_jog", "v": [7 x rad/s]}                              requiere control, a 10 Hz
+    {"type": "arm_move", "positions": [7 x rad]} | {"pose_id": N}      requiere control
+    {"type": "arm_cancel"}                                             requiere control
+    {"type": "arm_mode", "mode": "jog"|"trajectory"}                   requiere control
     {"type": "stop"}                                                   cualquier usuario
 
 Ejecución:
@@ -536,6 +547,101 @@ async def routes_delete(route_id: int, user=Depends(operator_user)):
     return {'ok': True}
 
 
+# ---------------------------------------------------------------- posturas del brazo
+class ArmPoseIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    positions: list[float] | None = Field(default=None, min_length=7, max_length=7)
+
+    @field_validator('name')
+    @classmethod
+    def clean_name(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError('el nombre no puede estar vacío')
+        return v
+
+
+class ArmPosePatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    positions: list[float] | None = Field(default=None, min_length=7, max_length=7)
+
+    @field_validator('name')
+    @classmethod
+    def clean_name(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError('el nombre no puede estar vacío')
+        return v
+
+
+def check_arm_positions(positions):
+    """Ángulos finitos y dentro de los límites blandos (si ya se conocen)."""
+    if not all(math.isfinite(p) for p in positions):
+        raise HTTPException(400, 'ángulos no válidos (NaN o infinito)')
+    limits = bridge.arm.get_limits()
+    if limits is None:
+        return
+    for name, p in zip(cfg.ARM_JOINTS, positions):
+        lim = limits[name]
+        if not lim['soft_lower'] <= p <= lim['soft_upper']:
+            raise HTTPException(400, f'{name}: {math.degrees(p):.1f}° fuera de los límites del brazo')
+
+
+@app.get('/api/arm/poses')
+async def arm_poses_list(user=Depends(current_user)):
+    return db.list_arm_poses()
+
+
+@app.post('/api/arm/poses', status_code=201)
+async def arm_poses_create(body: ArmPoseIn, user=Depends(operator_user)):
+    positions = body.positions
+    if positions is None:
+        positions = bridge.arm.joint_positions()
+        if positions is None:
+            raise HTTPException(409, 'no hay posición actual del brazo (sin joint_states)')
+    check_arm_positions(positions)
+    try:
+        pid = db.create_arm_pose(body.name, positions, user['id'])
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, f'ya existe una postura llamada {body.name!r}')
+    log.info('POSTURA creada por %s: %s %s', user['username'], body.name,
+             [round(math.degrees(p), 1) for p in positions])
+    bridge.emit('info', 'arm_poses_changed', f'{user["username"]} ha guardado la postura {body.name}')
+    return db.get_arm_pose(pid)
+
+
+@app.patch('/api/arm/poses/{pose_id}')
+async def arm_poses_update(pose_id: int, body: ArmPosePatch, user=Depends(operator_user)):
+    target = db.get_arm_pose(pose_id)
+    if target is None:
+        raise HTTPException(404, 'postura no encontrada')
+    if body.name is None and body.positions is None:
+        raise HTTPException(400, 'no hay cambios')
+    if body.positions is not None:
+        check_arm_positions(body.positions)
+    try:
+        db.update_arm_pose(pose_id, name=body.name, positions=body.positions)
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, f'ya existe una postura llamada {body.name!r}')
+    log.info('POSTURA %s modificada por %s', target['name'], user['username'])
+    bridge.emit('info', 'arm_poses_changed',
+                f'{user["username"]} ha modificado la postura {body.name or target["name"]}')
+    return db.get_arm_pose(pose_id)
+
+
+@app.delete('/api/arm/poses/{pose_id}')
+async def arm_poses_delete(pose_id: int, user=Depends(operator_user)):
+    target = db.get_arm_pose(pose_id)
+    if target is None:
+        raise HTTPException(404, 'postura no encontrada')
+    db.delete_arm_pose(pose_id)
+    log.info('POSTURA borrada por %s: %s', user['username'], target['name'])
+    bridge.emit('info', 'arm_poses_changed', f'{user["username"]} ha borrado la postura {target["name"]}')
+    return {'ok': True}
+
+
 # ---------------------------------------------------------------- cámara
 @app.get('/api/camera/arm.jpg')
 async def camera_snapshot(user=Depends(current_user)):
@@ -648,7 +754,8 @@ def _num(msg, key, default=None):
         raise CommandRejected(f"'{key}' debe ser un número")
 
 
-NEEDS_CONTROL = ('teleop', 'goal', 'cancel', 'run_route')
+NEEDS_CONTROL = ('teleop', 'goal', 'cancel', 'run_route',
+                 'arm_jog', 'arm_move', 'arm_cancel', 'arm_mode')
 
 
 def handle_command(msg, client: Client):
@@ -690,6 +797,20 @@ def handle_command(msg, client: Client):
         if not route['executable']:
             raise CommandRejected(f'la ruta {route["name"]!r} no tiene paradas')
         bridge.run_route(route, who=who)
+    elif kind == 'arm_jog':
+        bridge.arm.jog(msg.get('v'), who=who)
+    elif kind == 'arm_move':
+        if 'pose_id' in msg:
+            pose = db.get_arm_pose(int(_num(msg, 'pose_id')))
+            if pose is None:
+                raise CommandRejected('esa postura no existe')
+            bridge.arm.move_to(pose['positions'], who=who, label=pose['name'])
+        else:
+            bridge.arm.move_to(msg.get('positions'), who=who)
+    elif kind == 'arm_cancel':
+        bridge.arm.cancel_move(who=who)
+    elif kind == 'arm_mode':
+        bridge.arm.set_mode(str(msg.get('mode')), who=who)
     else:
         raise CommandRejected(f'tipo de mensaje desconocido: {kind!r}')
 

@@ -1,0 +1,104 @@
+<?xml version="1.0"?>
+<!--
+  Herramienta de atornillado: sujeción impresa + atornillador Kolver KDS-PL6 CA/FN.
+
+  Todas las medidas están referidas al sistema de coordenadas de la brida del
+  iiwa (el "Sistema de coordenadas1" de SolidWorks): origen en el centro de la
+  cara de la brida y Z saliendo hacia la herramienta. Las mallas ya están
+  recolocadas en ese origen y en metros.
+
+  Frames que crea:
+    <prefix>tool_link   cuerpo de la herramienta (sujeción, con el KDS fijado)
+    <prefix>tool_tcp    punta de la broca; Z = dirección de atornillado
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Masas reales. El modelo de SolidWorks usa densidad 1 g/cm3; el KDS pesa 1,1 kg. -->
+  <xacro:property name="tool_suj_mass" value="0.121"/>
+  <xacro:property name="tool_kds_mass" value="1.100"/>
+
+  <!-- TCP: centro de la cara frontal del portapuntas del KDS (z = 339 mm, 4 mm
+       descentrado en Y como en el modelo de Kolver). La punta es despreciable;
+       el tornillo (5-8 cm) sobresale más allá del TCP y se tendrá en cuenta en
+       la aproximación a la pared (Fase 6). -->
+  <xacro:property name="tool_bit_length" value="0.0"/>
+  <xacro:property name="tool_tcp_xyz" value="0.0 -0.004 ${0.339 + tool_bit_length}"/>
+
+  <!-- Giro de la herramienta alrededor de Z respecto a la brida (si en RViz
+       sale girada, se corrige aquí). -->
+  <xacro:property name="tool_mount_yaw" value="0.0"/>
+
+  <material name="tool_blue"><color rgba="0.13 0.38 0.85 1.0"/></material>
+  <material name="tool_silver"><color rgba="0.80 0.82 0.85 1.0"/></material>
+
+  <xacro:macro name="kmr_iiwa_tool" params="prefix parent">
+
+    <joint name="${prefix}tool_mount_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${prefix}tool_link"/>
+      <origin xyz="0 0 0" rpy="0 0 ${tool_mount_yaw}"/>
+    </joint>
+
+    <!-- Sujeción (pieza impresa) -->
+    <link name="${prefix}tool_link">
+      <inertial>
+        <origin xyz="0.00001 0.00003 0.07562" rpy="0 0 0"/>
+        <mass value="${tool_suj_mass}"/>
+        <inertia ixx="7.445e-4" ixy="0.0" ixz="2.0e-7"
+                 iyy="7.419e-4" iyz="5.0e-7" izz="7.28e-5"/>
+      </inertial>
+      <visual>
+        <geometry><mesh filename="package://kuka_lab/meshes/tool/visual/sujecion.stl"/></geometry>
+        <material name="tool_blue"/>
+      </visual>
+      <collision>
+        <geometry><mesh filename="package://kuka_lab/meshes/tool/collision/sujecion.stl"/></geometry>
+      </collision>
+    </link>
+
+    <!-- Atornillador Kolver KDS-PL6 (inercia de SolidWorks escalada a 1,1 kg) -->
+    <joint name="${prefix}tool_kds_joint" type="fixed">
+      <parent link="${prefix}tool_link"/>
+      <child link="${prefix}tool_kds_link"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="${prefix}tool_kds_link">
+      <inertial>
+        <origin xyz="0.0 -0.0017 0.1437" rpy="0 0 0"/>
+        <mass value="${tool_kds_mass}"/>
+        <inertia ixx="7.481e-3" ixy="0.0" ixz="3.0e-7"
+                 iyy="7.485e-3" iyz="-8.59e-5" izz="2.09e-4"/>
+      </inertial>
+      <visual>
+        <geometry><mesh filename="package://kuka_lab/meshes/tool/visual/kds_pl6.stl"/></geometry>
+        <material name="tool_silver"/>
+      </visual>
+      <collision>
+        <geometry><mesh filename="package://kuka_lab/meshes/tool/collision/kds_pl6.stl"/></geometry>
+      </collision>
+    </link>
+
+    <!-- TCP: punta de la broca -->
+    <joint name="${prefix}tool_tcp_joint" type="fixed">
+      <parent link="${prefix}tool_link"/>
+      <child link="${prefix}tool_tcp"/>
+      <origin xyz="${tool_tcp_xyz}" rpy="0 0 0"/>
+    </joint>
+    <link name="${prefix}tool_tcp"/>
+
+    <!-- Colores en Gazebo (los <material> del URDF no siempre llegan a gz) -->
+    <gazebo reference="${prefix}tool_link">
+      <visual><material>
+        <ambient>0.13 0.38 0.85 1</ambient><diffuse>0.13 0.38 0.85 1</diffuse>
+      </material></visual>
+    </gazebo>
+    <gazebo reference="${prefix}tool_kds_link">
+      <visual><material>
+        <ambient>0.80 0.82 0.85 1</ambient><diffuse>0.80 0.82 0.85 1</diffuse>
+        <specular>0.6 0.6 0.6 1</specular>
+      </material></visual>
+    </gazebo>
+
+  </xacro:macro>
+</robot>

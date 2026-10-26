@@ -3,6 +3,7 @@
 Todo se puede sobrescribir con variables de entorno, para que en Docker
 (paso 2.6) baste con un archivo .env.
 """
+import math
 import os
 
 
@@ -50,6 +51,42 @@ MAP_NAME = _env('MAP_NAME', 'laboratorio')
 #             si algo ha fallado)
 #   'skip' -> se salta esa parada y se continúa con la siguiente
 ROUTE_ON_FAILURE = _env('ROUTE_ON_FAILURE', 'stop')
+
+# --- Brazo (Fase 4) -----------------------------------------------------------
+ARM_JOINTS = [f'kmr_iiwa_A{i}' for i in range(1, 8)]          # A1 ... A7, en este orden
+JOINT_STATES_TOPIC = _env('JOINT_STATES_TOPIC', '/kmr_iiwa/joint_states')
+ROBOT_DESCRIPTION_TOPIC = _env('ROBOT_DESCRIPTION_TOPIC', '/kmr_iiwa/robot_description')
+# Si no llegan joint_states en este tiempo, el estado del brazo no es fiable.
+ARM_STATE_TIMEOUT = _env_float('ARM_STATE_TIMEOUT', 1.0)       # s
+
+# Margen respecto a los límites del URDF: el brazo nunca pasa de
+# (límite inferior + margen) a (límite superior - margen).
+ARM_LIMIT_MARGIN = math.radians(_env_float('ARM_LIMIT_MARGIN_DEG', 5.0))
+# Límites más estrechos por articulación (en grados). Solo ESTRECHAN, nunca amplían.
+# Ejemplo: {'kmr_iiwa_A2': (-90, 90)}
+ARM_LIMITS_OVERRIDE_DEG = {}
+
+ARM_BASE_FRAME = _env('ARM_BASE_FRAME', 'kmr_iiwa_link_0')
+ARM_TCP_FRAME = _env('ARM_TCP_FRAME', 'kmr_iiwa_tool_tcp')      # punta del atornillador (tool.xacro)
+
+CONTROLLER_MANAGER = _env('CONTROLLER_MANAGER', '/kmr_iiwa/controller_manager')
+ARM_JOG_CONTROLLER = _env('ARM_JOG_CONTROLLER', 'forward_position_controller')
+ARM_TRAJ_CONTROLLER = _env('ARM_TRAJ_CONTROLLER', 'joint_trajectory_controller')
+ARM_POSITION_CMD_TOPIC = _env('ARM_POSITION_CMD_TOPIC',
+                              '/kmr_iiwa/forward_position_controller/commands')
+ARM_TRAJ_ACTION = _env('ARM_TRAJ_ACTION',
+                       '/kmr_iiwa/joint_trajectory_controller/follow_joint_trajectory')
+
+# Jog articular
+ARM_JOG_MAX_VEL = math.radians(_env_float('ARM_JOG_MAX_VEL_DEG', 15.0))   # rad/s por articulación
+ARM_JOG_RATE = _env_float('ARM_JOG_RATE', 50.0)                           # Hz del integrador
+ARM_WATCHDOG_TIMEOUT = _env_float('ARM_WATCHDOG_TIMEOUT', 0.3)            # s sin órdenes -> parar
+# Máxima distancia entre objetivo y posición real antes de dejar de avanzar
+ARM_MAX_TRACKING_ERROR = math.radians(_env_float('ARM_MAX_TRACKING_ERROR_DEG', 6.0))
+
+# Ir a postura (trayectoria): velocidad máxima de la articulación que más se mueve
+ARM_MOVE_MAX_VEL = math.radians(_env_float('ARM_MOVE_MAX_VEL_DEG', 20.0))  # rad/s
+ARM_MOVE_MIN_TIME = _env_float('ARM_MOVE_MIN_TIME', 1.5)                    # s
 
 # --- Seguridad del movimiento ---------------------------------------------
 # Límites de teleoperación. Una orden por encima se RECHAZA (no se recorta).

@@ -76,9 +76,16 @@
     <div class="side">
     <!-- Panel: teleoperación -->
     <section class="panel teleop-panel">
-      <h2>Teleoperación</h2>
+      <div class="tp-head">
+        <div class="seg" role="tablist" aria-label="Qué controlar">
+          <button class="seg-btn active" data-tp-tab="base">Base</button>
+          <button class="seg-btn" data-tp-tab="arm">Brazo</button>
+        </div>
+        <span class="arm-mode" id="arm-mode" title="Modo del brazo"></span>
+      </div>
       <p class="no-control-note" id="no-control-note">Pulsa «Tomar control» para mover el robot.</p>
 
+      <div class="tp-body" id="tp-base">
       <div class="joy-row">
         <div class="joy-block">
           <div class="joy" id="joy-xy">
@@ -111,6 +118,44 @@
 
       <p class="keys">Teclado: <kbd>W</kbd> avanzar · <kbd>A</kbd>/<kbd>D</kbd> lateral ·
         <kbd>Q</kbd>/<kbd>E</kbd> girar · <kbd>Espacio</kbd> parada</p>
+      </div>
+
+      <!-- Brazo -->
+      <div class="tp-body hidden" id="tp-arm">
+        <div class="arm-status" id="arm-status">Sin datos del brazo</div>
+
+        <div class="arm-joints" id="arm-joints"></div>
+
+        <div class="speed">
+          <span>Velocidad jog</span>
+          <div class="seg" role="group" aria-label="Velocidad del jog del brazo">
+            <button class="seg-btn" data-arm-speed="0.25">25%</button>
+            <button class="seg-btn active" data-arm-speed="0.5">50%</button>
+            <button class="seg-btn" data-arm-speed="1">100%</button>
+          </div>
+        </div>
+
+        <div class="tcp-readout">
+          <div class="tcp-title">TCP <small id="tcp-frame"></small></div>
+          <div class="tcp-grid">
+            <div><span>X</span><b id="tcp-x">—</b><small>mm</small></div>
+            <div><span>Y</span><b id="tcp-y">—</b><small>mm</small></div>
+            <div><span>Z</span><b id="tcp-z">—</b><small>mm</small></div>
+            <div><span>Roll</span><b id="tcp-r">—</b><small>°</small></div>
+            <div><span>Pitch</span><b id="tcp-p">—</b><small>°</small></div>
+            <div><span>Yaw</span><b id="tcp-yw">—</b><small>°</small></div>
+          </div>
+        </div>
+
+        <div class="arm-poses">
+          <div class="pp-actions">
+            <b class="poses-title">Posturas</b>
+            <button class="ghost small needs-operator" id="btn-save-arm-pose">+ Guardar actual</button>
+            <button class="ghost small danger-text needs-control hidden" id="btn-arm-cancel">Cancelar movimiento</button>
+          </div>
+          <ul class="pp-list" id="arm-poses-list"></ul>
+        </div>
+      </div>
     </section>
 
     <!-- Panel: puntos y rutas -->

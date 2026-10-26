@@ -2,6 +2,7 @@
 
 import { Alerts } from './alerts.js';
 import { api } from './api.js';
+import { ArmPanel } from './arm.js';
 import { ArmCamera } from './camera.js';
 import { Connection } from './connection.js';
 import { MapView } from './mapview.js';
@@ -39,6 +40,7 @@ function startSession(user) {
   $('login').hidden = true;
   conn.start();
   points.reload();
+  arm.reloadPoses();
   camera.start();
 }
 
@@ -67,7 +69,7 @@ const conn = new Connection({
     setDot('st-client', connected ? 'on' : 'off');
     alerts.condition('ws_lost', !connected && me !== null, 'emergency',
       'SIN CONEXIÓN con el gateway: el robot no recibe órdenes de este panel');
-    if (connected) { alerts.push('info', 'Conectado al gateway'); points.reload(); }
+    if (connected) { alerts.push('info', 'Conectado al gateway'); points.reload(); arm.reloadPoses(); }
     else { setDot('st-ros', ''); setControl(false); }
   },
   onAuthLost: () => {
@@ -78,13 +80,14 @@ const conn = new Connection({
 });
 
 const handlers = {
-  config: (msg) => teleop.setLimits(msg.limits),
+  config: (msg) => { teleop.setLimits(msg.limits); arm.setConfig(msg.arm); },
   state: (msg) => onState(msg),
   map: (msg) => { map.setMap(msg); $('map-hint').classList.add('hidden'); },
   scan: (msg) => map.setScan(msg),
   event: (msg) => {
     alerts.push(msg.level, msg.message, msg.time);
     if (msg.code === 'points_changed') points.reload();
+    if (msg.code === 'arm_poses_changed') arm.reloadPoses();
   },
   notice: (msg) => alerts.push(msg.level, msg.message),
   error: (msg) => alerts.push('warning', msg.message),
@@ -111,6 +114,11 @@ const points = new PointsPanel({
 const camera = new ArmCamera({
   box: $('cam-box'), img: $('cam-img'), msg: $('cam-msg'), info: $('cam-info'),
   toggleBtn: $('btn-camera'), sizeBtn: $('cam-size'),
+});
+
+const arm = new ArmPanel({
+  send: (msg) => conn.send(msg),
+  notify: (level, text) => alerts.push(level, text),
 });
 
 const teleop = new Teleop({
@@ -148,6 +156,7 @@ function onState(s) {
   $('st-route-txt').textContent = s.route_running ? routeStatusText(nav, route) : '';
 
   camera.setStatus(s.camera);
+  arm.setState(s.arm);
   map.setGoal(nav.goal ? { ...nav.goal, state: nav.state } : null);
   map.setRoute(route);
   points.setNav(nav);
@@ -216,7 +225,7 @@ function renderControl(c) {
 
 function setControl(value) {
   hasControl = value;
-  teleop.setEnabled(value);
+  applyEnables();
   document.body.classList.toggle('no-control', !value);
   $('no-control-note').textContent = me?.role === 'observer'
     ? 'Rol observador: solo visualización (la PARADA sigue disponible).'
@@ -284,6 +293,30 @@ document.querySelectorAll('[data-speed]').forEach((btn) => {
   });
 });
 
+// ------------------------------------------------------------------ pestañas Base / Brazo
+let tpTab = 'base';
+try { tpTab = localStorage.getItem('kmr.tp.tab') === 'arm' ? 'arm' : 'base'; } catch { /* sin almacenamiento */ }
+
+/** Solo los mandos de la pestaña visible están activos (y solo con control). */
+function applyEnables() {
+  teleop.setEnabled(hasControl && tpTab === 'base');
+  arm.setEnabled(hasControl && tpTab === 'arm');
+}
+
+function showTpTab(tab, user = false) {
+  tpTab = tab;
+  document.querySelectorAll('[data-tp-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tpTab === tab));
+  $('tp-base').classList.toggle('hidden', tab !== 'base');
+  $('tp-arm').classList.toggle('hidden', tab !== 'arm');
+  try { localStorage.setItem('kmr.tp.tab', tab); } catch { /* sin almacenamiento */ }
+  // Al mover el brazo conviene ver la cámara
+  if (user && tab === 'arm' && camera.mode === 'off') camera.setMode('pip');
+  applyEnables();
+}
+document.querySelectorAll('[data-tp-tab]').forEach((b) =>
+  b.addEventListener('click', () => showTpTab(b.dataset.tpTab, true)));
+
 // ------------------------------------------------------------------ arranque
+showTpTab(tpTab);
 setControl(false);
 api('/api/me').then((r) => (r.ok ? startSession(r.body) : showLogin()));

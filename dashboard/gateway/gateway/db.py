@@ -1,17 +1,20 @@
-"""Base de datos SQLite del gateway: usuarios y sesiones.
+"""Base de datos SQLite del gateway: usuarios, sesiones, puntos, rutas y
+posturas del brazo.
 
 Una única conexión protegida con un lock: las operaciones son pequeñas y
-poco frecuentes (login, alta de usuarios), así que no hace falta más.
-El esquema lleva versión para poder migrarlo en pasos siguientes
-(2.4: puntos y rutas).
+poco frecuentes, así que no hace falta más. El esquema lleva versión.
+  v1: usuarios y sesiones
+  v2: puntos y rutas (2.4)
+  v3: posturas del brazo (4.5)
 """
+import json
 import os
 import sqlite3
 import threading
 import time
 from contextlib import contextmanager
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 
@@ -58,6 +61,17 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
+);
+
+-- Posturas del brazo: 7 ángulos (rad) en el orden A1..A7, guardados como JSON.
+-- No dependen del mapa: son relativas al propio robot.
+CREATE TABLE IF NOT EXISTS arm_poses (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+    positions  TEXT    NOT NULL,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at REAL    NOT NULL,
+    updated_at REAL
 );
 
 CREATE TABLE IF NOT EXISTS route_points (
@@ -291,5 +305,38 @@ class Database:
             r['executable'] = len(r['stops']) > 0
         return result
 
+    # ------------------------------------------------------------- posturas del brazo
+    @staticmethod
+    def _decode_pose(row):
+        if row is not None:
+            row['positions'] = json.loads(row['positions'])
+        return row
 
+    def list_arm_poses(self):
+        rows = self._exec('SELECT * FROM arm_poses ORDER BY name', fetch='all')
+        return [self._decode_pose(r) for r in rows]
 
+    def get_arm_pose(self, pose_id):
+        return self._decode_pose(
+            self._exec('SELECT * FROM arm_poses WHERE id = ?', (pose_id,), fetch='one'))
+
+    def create_arm_pose(self, name, positions, created_by):
+        cur = self._exec(
+            'INSERT INTO arm_poses (name, positions, created_by, created_at) VALUES (?, ?, ?, ?)',
+            (name, json.dumps([float(p) for p in positions]), created_by, time.time()))
+        return cur.lastrowid
+
+    def update_arm_pose(self, pose_id, *, name=None, positions=None):
+        sets, params = [], []
+        if name is not None:
+            sets.append('name = ?'); params.append(name)
+        if positions is not None:
+            sets.append('positions = ?'); params.append(json.dumps([float(p) for p in positions]))
+        if not sets:
+            return
+        sets.append('updated_at = ?')
+        params.extend([time.time(), pose_id])
+        self._exec(f'UPDATE arm_poses SET {", ".join(sets)} WHERE id = ?', params)
+
+    def delete_arm_pose(self, pose_id):
+        self._exec('DELETE FROM arm_poses WHERE id = ?', (pose_id,))

@@ -159,6 +159,7 @@ kbd { font-family: var(--mono); background: var(--panel-2); border: 1px solid va
 /* Sin control: los mandos de movimiento se atenúan (la PARADA nunca) */
 body.no-control .teleop-panel .joy-row,
 body.no-control .teleop-panel .speed,
+body.no-control .arm-joints .aj-btn,
 body.no-control [data-tool="goal"],
 body.no-control #btn-clear-goal { opacity: .35; pointer-events: none; filter: grayscale(1); }
 .no-control-note { display: none; margin: 0 14px; padding: 6px 10px; border-radius: 8px;
@@ -180,6 +181,49 @@ body.no-control .no-control-note { display: block; }
 .cam-btn { background: #0008; border: 1px solid #fff4; color: #fff; border-radius: 6px;
   padding: 2px 8px; font-size: 14px; line-height: 1.2; }
 #btn-camera.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- Pestañas Base / Brazo ---------- */
+.tp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px; border-bottom: 1px solid var(--line); }
+.tp-body { display: flex; flex-direction: column; gap: 10px; }
+.arm-mode { font-size: 11px; font-family: var(--mono); color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
+.arm-mode.jog { color: #9be6bd; border-color: #2fbf7166; }
+.arm-mode.trajectory { color: #a9c9ff; border-color: #3d8bfd66; }
+.arm-mode.switching { color: var(--warn); border-color: #f2a93b66; }
+
+/* ---------- Brazo ---------- */
+.arm-status { margin: 0 14px; padding: 6px 10px; border-radius: 8px; background: var(--panel-2);
+  font-size: 12px; color: var(--muted); }
+.arm-status.moving { color: #a9c9ff; }
+.arm-status.bad { color: #ffb3b5; }
+.arm-joints { display: flex; flex-direction: column; gap: 6px; padding: 0 14px; }
+.aj-row { display: grid; grid-template-columns: 26px 40px 1fr 64px 40px; align-items: center; gap: 6px; }
+.aj-name { font-family: var(--mono); font-weight: 600; color: var(--muted); }
+body.role-observer .aj-row { grid-template-columns: 26px 1fr 64px; }
+.aj-btn { height: 34px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2);
+  font-size: 18px; font-weight: 700; touch-action: none; user-select: none; -webkit-user-select: none; }
+.aj-btn:active, .aj-btn.held { background: var(--accent); border-color: var(--accent); color: #fff; }
+.aj-bar { position: relative; height: 10px; border-radius: 5px; background: #2a313b; overflow: visible; }
+.aj-bar::after { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: #4a525d; }
+.aj-mark { position: absolute; top: -4px; width: 4px; height: 18px; margin-left: -2px; border-radius: 2px;
+  background: var(--text); box-shadow: 0 0 0 1px #000a; }
+.aj-mark.near { background: var(--warn); }
+.aj-mark.target { background: transparent; border: 1px dashed #a9c9ff; box-shadow: none; }
+.aj-val { font-family: var(--mono); text-align: right; font-size: 13px; }
+.aj-val.near { color: var(--warn); }
+
+.tcp-readout { margin: 0 14px; background: var(--panel-2); border-radius: 8px; padding: 6px 8px; }
+.tcp-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
+.tcp-title small { text-transform: none; letter-spacing: 0; font-family: var(--mono); }
+.tcp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 8px; }
+.tcp-grid div { display: flex; align-items: baseline; gap: 4px; }
+.tcp-grid span { color: var(--muted); font-size: 11px; min-width: 34px; }
+.tcp-grid b { font-family: var(--mono); font-size: 13px; flex: 1; text-align: right; }
+.tcp-grid small { color: var(--muted); font-size: 10px; }
+
+.arm-poses { padding: 0 14px; display: flex; flex-direction: column; gap: 6px; }
+.poses-title { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-right: auto; }
 
 /* ---------- Puntos y rutas ---------- */
 .points-panel { flex: 1; min-height: 220px; }

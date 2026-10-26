@@ -13,6 +13,9 @@ Responsabilidades:
   - Emitir eventos (avisos y emergencias) para la barra de avisos.
   - Cámara del brazo: guarda la última imagen y la comprime a JPEG bajo
     demanda (una vez por fotograma aunque la vean varios clientes).
+  - Brazo: lo gestiona ArmController (arm.py), creado aquí como self.arm.
+  - Bloqueo base/brazo: la base no se mueve mientras el brazo se mueve, y al
+    revés (lo comprueba arm.py con nav_running()).
 
 La parte web (main.py) solo lee estados con los métodos get_* y llama a los
 métodos de comando. Todo el acceso compartido va protegido con un lock.
@@ -53,8 +56,8 @@ except ImportError:  # pragma: no cover
     cv2 = np = None
 
 
-class CommandRejected(ValueError):
-    """Orden rechazada (fuera de límites, Nav2 no disponible, ...)."""
+from .arm import ArmController
+from .errors import CommandRejected  # noqa: F401  (main.py la importa desde aquí)
 
 
 def yaw_from_quat(q):
@@ -137,6 +140,8 @@ class RosBridge(Node):
         steady = Clock(clock_type=ClockType.STEADY_TIME)
         self.create_timer(0.05, self._watchdog, clock=steady)
         self.create_timer(0.5, self._check_ros, clock=steady)
+
+        self.arm = ArmController(self, cfg)
 
         log.info('Nodo ROS listo. Teleop -> %s, límites vx=[%.2f, %.2f] vy=±%.2f '
                  'wz=±%.2f, watchdog=%.2fs', cfg.TELEOP_TOPIC, cfg.MIN_VX,
@@ -313,7 +318,8 @@ class RosBridge(Node):
                 'route_running': nav['state'] in NAV_RUNNING,
                 'teleop_active': self._teleop_active,
                 'nav2_ready': self.nav_client.server_is_ready(),
-                'camera': self.camera_status()}
+                'camera': self.camera_status(),
+                'arm': self.arm.get_state()}
 
     def get_config(self):
         """Límites que el frontend necesita para dibujar los controles."""
@@ -322,7 +328,10 @@ class RosBridge(Node):
                 'limits': {'vx_min': c.MIN_VX, 'vx_max': c.MAX_VX,
                            'vy_max': c.MAX_VY, 'wz_max': c.MAX_WZ},
                 'base_frame': c.BASE_FRAME,
-                'watchdog_timeout': c.WATCHDOG_TIMEOUT}
+                'watchdog_timeout': c.WATCHDOG_TIMEOUT,
+                'arm': {'joints': c.ARM_JOINTS,
+                        'jog_max_vel': c.ARM_JOG_MAX_VEL,
+                        'watchdog_timeout': c.ARM_WATCHDOG_TIMEOUT}}
 
     def get_map(self):
         with self._lock:
@@ -354,6 +363,8 @@ class RosBridge(Node):
             self._reject(who, f'wz={wz:.3f} fuera de rango (máx ±{c.MAX_WZ:.3f})')
 
         moving = any(abs(v) > 1e-4 for v in (vx, vy, wz))
+        if moving and self.arm.moving():
+            self._reject(who, 'no se puede mover la base mientras el brazo se mueve')
         if moving and self.nav_running():
             log.info('Teleop de %s: se cancela la navegación en curso', who)
             self._emit('warning', 'nav_preempted',
@@ -374,6 +385,7 @@ class RosBridge(Node):
         self.cancel_goal(who)
         self._publish_twist(0.0, 0.0, 0.0)
         self._teleop_active = False
+        self.arm.stop(who)
 
     def halt_teleop(self, who='?'):
         """Para la teleoperación en curso sin tocar la navegación (p. ej. al
@@ -382,6 +394,7 @@ class RosBridge(Node):
             log.info('Teleop detenida (%s)', who)
         self._publish_twist(0.0, 0.0, 0.0)
         self._teleop_active = False
+        self.arm.stop(who)
 
     def _publish_twist(self, vx, vy, wz):
         msg = TwistStamped()
@@ -439,6 +452,8 @@ class RosBridge(Node):
                 self._reject(who, f'{name} no es un número válido')
 
     def _check_nav2(self, who):
+        if self.arm.moving():
+            self._reject(who, 'no se puede navegar mientras el brazo se mueve')
         if not self.nav_client.server_is_ready():
             self._reject(who, 'Nav2 no está disponible (navigate_to_pose sin servidor)')
 

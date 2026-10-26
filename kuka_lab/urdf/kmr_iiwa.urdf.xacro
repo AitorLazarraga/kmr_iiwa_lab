@@ -6,6 +6,7 @@
   <xacro:include filename="$(find kuka_lab)/urdf/lbr_gazebo.xacro" />
   <xacro:include filename="$(find lbr_ros2_control)/urdf/lbr_system_interface.xacro" />
   <xacro:include filename="$(find gz_virtual_base_system)/urdf/virtual_base_macro.urdf.xacro" />
+  <xacro:include filename="$(find kuka_lab)/urdf/tool.xacro" />
 
   <!-- arguments -->
   <xacro:arg name="root_link" default="world"/> <!-- Put world for the gazebo model, odom for nav2 -->
@@ -77,36 +78,74 @@
   <xacro:virtual_base_system root_link="$(arg root_link)" base_link="$(arg base_name)_base_link"/>
 
   <!-- ============================================================ -->
-  <!-- Cámara del brazo (paso 2.5)                                    -->
-  <!-- Montada en el extremo del iiwa, mirando en el eje de la        -->
-  <!-- herramienta (+Z de link_ee) y desplazada a un lado para que el -->
-  <!-- atornillador no la tape. La posición definitiva se fijará con  -->
-  <!-- el diseño de la brida (Fase 3): cambiar solo camera_xyz.        -->
+  <!-- Herramienta (Fase 3): sujeción + atornillador Kolver KDS-PL6.  -->
+  <!-- Definida en tool.xacro. Crea $(arg robot_name)_tool_link y el   -->
+  <!-- TCP $(arg robot_name)_tool_tcp (punta del portapuntas).         -->
   <!-- ============================================================ -->
-  <xacro:property name="camera_xyz" value="0.07 0.0 0.0"/>
+  <xacro:kmr_iiwa_tool prefix="$(arg robot_name)_" parent="$(arg robot_name)_link_ee"/>
+
+  <!-- ============================================================ -->
+  <!-- Cámara de supervisión (solo simulación)                        -->
+  <!-- Fija en un mástil en el lateral izquierdo de la plataforma,     -->
+  <!-- elevada y apuntando al brazo. La orientación se                 -->
+  <!-- calcula para mirar a camera_target (coordenadas de              -->
+  <!-- $(arg base_name)_base_link): moviendo esos valores se reencuadra.-->
+  <!-- El tópico sigue siendo arm_camera para no tocar bridge/gateway. -->
+  <!-- ============================================================ -->
+  <xacro:property name="deck_z"        value="0.70"/>   <!-- cubierta de la plataforma -->
+  <xacro:property name="camera_mast_x" value="0.0"/>
+  <xacro:property name="camera_mast_y" value="0.30"/>
+  <xacro:property name="camera_mast_h" value="1.05"/>   <!-- altura del mástil sobre la cubierta -->
+  <xacro:property name="camera_z"      value="${deck_z + camera_mast_h}"/>
+  <xacro:property name="camera_target_x" value="0.60"/> <!-- delante de la base del brazo... -->
+  <xacro:property name="camera_target_y" value="-0.18"/>
+  <xacro:property name="camera_target_z" value="1.10"/> <!-- ...a media altura -->
+  <xacro:property name="camera_hfov"   value="1.5708"/> <!-- 90° -->
+
+  <xacro:property name="camera_yaw"
+    value="${atan2(camera_target_y - camera_mast_y, camera_target_x - camera_mast_x)}"/>
+  <xacro:property name="camera_pitch"
+    value="${atan2(camera_z - camera_target_z, sqrt((camera_target_x - camera_mast_x)**2 + (camera_target_y - camera_mast_y)**2))}"/>
+
+  <!-- Sin <collision>: el mástil no existe en el robot real y MoveIt no
+       debe esquivarlo. El brazo puede atravesarlo visualmente. -->
+  <link name="$(arg base_name)_camera_mast_link">
+    <visual>
+      <origin xyz="0 0 ${camera_mast_h / 2}" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.02" length="${camera_mast_h}"/></geometry>
+      <material name="mast_grey"><color rgba="0.45 0.45 0.45 1"/></material>
+    </visual>
+    <inertial>
+      <origin xyz="0 0 ${camera_mast_h / 2}" rpy="0 0 0"/>
+      <mass value="0.01"/>
+      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-6"/>
+    </inertial>
+  </link>
+  <joint name="$(arg base_name)_camera_mast_joint" type="fixed">
+    <parent link="$(arg base_name)_base_link"/>
+    <child link="$(arg base_name)_camera_mast_link"/>
+    <origin xyz="${camera_mast_x} ${camera_mast_y} ${deck_z}" rpy="0 0 0"/>
+  </joint>
 
   <link name="$(arg robot_name)_camera_link">
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry><box size="0.03 0.06 0.03"/></geometry>
       <material name="camera_black"><color rgba="0.1 0.1 0.1 1"/></material>
     </visual>
     <inertial>
-      <mass value="0.05"/>
-      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
+      <mass value="0.001"/>
+      <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
     </inertial>
   </link>
 
-  <!-- rpy 0 -pi/2 0: el eje X de la cámara (hacia donde mira en Gazebo)
-       queda alineado con el eje Z de la brida (eje de la herramienta) -->
+  <!-- El eje X de la cámara (hacia donde mira en Gazebo) apunta a camera_target -->
   <joint name="$(arg robot_name)_camera_joint" type="fixed">
-    <parent link="$(arg robot_name)_link_ee"/>
+    <parent link="$(arg base_name)_camera_mast_link"/>
     <child link="$(arg robot_name)_camera_link"/>
-    <origin xyz="${camera_xyz}" rpy="0 -1.5708 0"/>
+    <origin xyz="0 0 ${camera_mast_h + 0.02}" rpy="0 ${camera_pitch} ${camera_yaw}"/>
   </joint>
 
-  <!-- Optical frame (convención ROS para cámaras: z hacia delante,
-       x a la derecha, y hacia abajo). Lo usará la visión de la Fase 6. -->
+  <!-- Optical frame (convención ROS: z hacia delante, x derecha, y abajo) -->
   <link name="$(arg robot_name)_camera_optical_frame"/>
   <joint name="$(arg robot_name)_camera_optical_joint" type="fixed">
     <parent link="$(arg robot_name)_camera_link"/>
@@ -123,15 +162,15 @@
       <always_on>1</always_on>
       <visualize>true</visualize>
       <camera>
-        <horizontal_fov>1.047</horizontal_fov>   <!-- 60° -->
+        <horizontal_fov>${camera_hfov}</horizontal_fov>
         <image>
           <width>640</width>
           <height>480</height>
           <format>R8G8B8</format>
         </image>
         <clip>
-          <near>0.02</near>
-          <far>10.0</far>
+          <near>0.05</near>
+          <far>15.0</far>
         </clip>
       </camera>
     </sensor>

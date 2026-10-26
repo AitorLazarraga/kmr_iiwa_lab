@@ -4,6 +4,7 @@ from ament_index_python.packages import (
 )
 from launch import LaunchDescription
 from launch.actions import (
+    AppendEnvironmentVariable,
     DeclareLaunchArgument,
     IncludeLaunchDescription,
     OpaqueFunction,
@@ -42,6 +43,14 @@ def generate_launch_description():
     P_arg = DeclareLaunchArgument("P", default_value="0")
     Y_arg = DeclareLaunchArgument("Y", default_value="0")
     rviz_arg = DeclareLaunchArgument("rviz", default_value="true")
+
+    # Gazebo traduce package://kuka_lab/... a model://kuka_lab/... y lo busca en
+    # GZ_SIM_RESOURCE_PATH. Los paquetes lbr ya añaden su ruta con un hook; los
+    # paquetes Python no, así que se añade aquí la carpeta share/ que contiene
+    # kuka_lab (mallas de la herramienta).
+    gz_resource_path = AppendEnvironmentVariable(
+        "GZ_SIM_RESOURCE_PATH", os.path.dirname(pkg)
+    )
     
     robot_xacro = os.path.join(pkg, "urdf/", "kmr_iiwa.urdf.xacro")
     assert os.path.exists(robot_xacro), "The kmr_iiwa.urdf.xacro doesnt exist in " + str(robot_xacro)
@@ -190,6 +199,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        gz_resource_path,
         use_sim_time_arg,
         robot_name_arg,
         arm_name_arg,
