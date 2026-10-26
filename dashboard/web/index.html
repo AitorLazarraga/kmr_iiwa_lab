@@ -51,18 +51,29 @@
         <div class="seg" role="group" aria-label="Herramienta del mapa">
           <button class="seg-btn active" data-tool="pan" title="Mover la vista">Mover</button>
           <button class="seg-btn" data-tool="goal" title="Pulsar y arrastrar para orientar">Poner goal</button>
+          <button class="seg-btn needs-operator" data-tool="point" title="Pulsar y arrastrar para orientar; pide un nombre">Añadir punto</button>
         </div>
+        <button class="ghost" id="btn-camera" title="Mostrar la cámara del brazo">Cámara</button>
         <button class="ghost" id="btn-center">Centrar robot</button>
         <button class="ghost" id="btn-fit">Ajustar mapa</button>
-        <button class="ghost danger-text" id="btn-clear-goal">Borrar goal</button>
+        <button class="ghost danger-text" id="btn-clear-goal" title="Cancela el goal o la ruta en curso, o borra el que haya quedado marcado">Cancelar / borrar</button>
       </div>
       <div class="map-wrap">
         <canvas id="map"></canvas>
         <div class="map-hint" id="map-hint">Esperando mapa…</div>
+        <div class="cam-box hidden" id="cam-box">
+          <img id="cam-img" alt="Cámara del brazo">
+          <div class="cam-msg hidden" id="cam-msg"></div>
+          <div class="cam-bar">
+            <span>Cámara del brazo<small id="cam-info"></small></span>
+            <button class="cam-btn" id="cam-size" title="Ampliar">⤢</button>
+          </div>
+        </div>
       </div>
       <div class="goal-info" id="goal-info">Sin goal</div>
     </section>
 
+    <div class="side">
     <!-- Panel: teleoperación -->
     <section class="panel teleop-panel">
       <h2>Teleoperación</h2>
@@ -101,6 +112,47 @@
       <p class="keys">Teclado: <kbd>W</kbd> avanzar · <kbd>A</kbd>/<kbd>D</kbd> lateral ·
         <kbd>Q</kbd>/<kbd>E</kbd> girar · <kbd>Espacio</kbd> parada</p>
     </section>
+
+    <!-- Panel: puntos y rutas -->
+    <section class="panel points-panel">
+      <div class="pp-head">
+        <div class="seg" role="tablist">
+          <button class="seg-btn active" data-pp-tab="points">Puntos</button>
+          <button class="seg-btn" data-pp-tab="routes">Rutas</button>
+        </div>
+      </div>
+
+      <div class="pp-body" id="pp-points">
+        <div class="pp-actions needs-operator">
+          <button class="ghost" id="btn-save-pose">+ Posición actual</button>
+          <small>o «Añadir punto» en el mapa</small>
+        </div>
+        <ul class="pp-list" id="points-list"></ul>
+      </div>
+
+      <div class="pp-body hidden" id="pp-routes">
+        <div class="pp-actions needs-operator">
+          <button class="ghost" id="btn-new-route">+ Nueva ruta</button>
+        </div>
+        <ul class="pp-list" id="routes-list"></ul>
+
+        <div class="route-editor hidden" id="route-editor">
+          <div class="re-title" id="re-title">Nueva ruta</div>
+          <input id="re-name" placeholder="Nombre de la ruta" maxlength="40">
+          <div class="re-head"><span>Parada</span><span>Espera</span></div>
+          <ol class="re-stops" id="re-stops"></ol>
+          <div class="re-add">
+            <select id="re-point"></select>
+            <button class="ghost small" id="re-add-btn">+ Añadir parada</button>
+          </div>
+          <div class="re-buttons">
+            <button class="primary" id="re-save">Guardar</button>
+            <button class="ghost" id="re-cancel">Cancelar</button>
+          </div>
+        </div>
+      </div>
+    </section>
+    </div>
 
   </main>
 

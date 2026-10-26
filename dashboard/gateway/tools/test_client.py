@@ -8,11 +8,13 @@ Secuencia:
   4. Teleop: avanza a 0.2 m/s durante 2 s; luego deja de enviar -> watchdog.
   5. Orden fuera de límites y marcha atrás -> deben rechazarse.
   6. (opcional) --goal X Y : manda un goal y espera a que termine.
+     (opcional) --route ID  : ejecuta una ruta guardada y muestra el progreso.
   7. Libera el control.
 
 Uso:
   python tools/test_client.py --user aitor
   python tools/test_client.py --user aitor --goal 3.0 2.0
+  python tools/test_client.py --user aitor --route 1
 """
 import argparse
 import asyncio
@@ -55,6 +57,7 @@ async def receiver(ws, st):
         kind = msg.get('type')
         if kind == 'state':
             st['nav'] = msg['nav'].get('state')
+            st['route'] = msg['nav'].get('route')
             st['control'] = msg['control']
             if st['verbose']:
                 p = msg['pose']
@@ -112,6 +115,25 @@ async def main(args):
             await asyncio.sleep(0.5)
         print(f'   resultado: {st["nav"]} en {time.monotonic() - t0:.1f} s')
 
+    if args.route is not None:
+        print(f'\n== 6b. Ruta {args.route} (espera hasta terminar) ==')
+        await send({'type': 'run_route', 'route_id': args.route})
+        t0 = time.monotonic()
+        await asyncio.sleep(1.0)
+        last = None
+        while st['nav'] not in TERMINAL and time.monotonic() - t0 < args.timeout:
+            r = st.get('route') or {}
+            now = (r.get('current'), r.get('phase'))
+            if r and now != last:
+                i = min(r['current'], r['total'] - 1)
+                extra = f" (espera {r.get('wait_remaining')} s)" if r['phase'] == 'waiting' else ''
+                print(f"   parada {i + 1}/{r['total']}: {r['stops'][i]['name']} · {r['phase']}{extra}")
+                last = now
+            await asyncio.sleep(0.2)
+        r = st.get('route') or {}
+        print(f'   resultado: {st["nav"]} · alcanzadas {r.get("reached")}/{r.get("total")} '
+              f'· saltadas {r.get("skipped")} · {time.monotonic() - t0:.1f} s')
+
     print('\n== 7. Liberar el control ==')
     await send({'type': 'release_control'})
     await asyncio.sleep(0.5)
@@ -125,5 +147,6 @@ if __name__ == '__main__':
     ap.add_argument('--user', required=True)
     ap.add_argument('--password', help='si se omite, se pide por teclado')
     ap.add_argument('--goal', nargs=2, type=float, metavar=('X', 'Y'))
-    ap.add_argument('--timeout', type=float, default=180.0, help='espera máxima del goal (s)')
+    ap.add_argument('--route', type=int, metavar='ID', help='ejecutar la ruta con este id')
+    ap.add_argument('--timeout', type=float, default=300.0, help='espera máxima del goal o la ruta (s)')
     asyncio.run(main(ap.parse_args()))

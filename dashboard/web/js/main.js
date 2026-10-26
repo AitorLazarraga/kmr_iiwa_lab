@@ -1,8 +1,11 @@
 // Punto de entrada: sesión, conexión con el gateway y paneles.
 
 import { Alerts } from './alerts.js';
+import { api } from './api.js';
+import { ArmCamera } from './camera.js';
 import { Connection } from './connection.js';
 import { MapView } from './mapview.js';
+import { PointsPanel } from './points.js';
 import { Teleop } from './teleop.js';
 
 const $ = (id) => document.getElementById(id);
@@ -19,19 +22,9 @@ let lastState = null;
 let lastStateAt = 0;
 
 // ------------------------------------------------------------------ sesión
-async function api(path, options = {}) {
-  const r = await fetch(path, {
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
-  let body = null;
-  try { body = await r.json(); } catch { /* sin cuerpo */ }
-  return { ok: r.ok, status: r.status, body };
-}
-
 function showLogin(message = '') {
   conn.stop();
+  camera.stop();
   setControl(false);
   $('login-error').textContent = message;
   $('login').hidden = false;
@@ -42,8 +35,11 @@ function showLogin(message = '') {
 function startSession(user) {
   me = user;
   $('user-chip').innerHTML = `<b>${escapeHtml(user.username)}</b> · ${ROLE_TEXT[user.role] || user.role}`;
+  for (const r of Object.keys(ROLE_TEXT)) document.body.classList.toggle(`role-${r}`, user.role === r);
   $('login').hidden = true;
   conn.start();
+  points.reload();
+  camera.start();
 }
 
 $('login-form').addEventListener('submit', async (e) => {
@@ -71,7 +67,7 @@ const conn = new Connection({
     setDot('st-client', connected ? 'on' : 'off');
     alerts.condition('ws_lost', !connected && me !== null, 'emergency',
       'SIN CONEXIÓN con el gateway: el robot no recibe órdenes de este panel');
-    if (connected) alerts.push('info', 'Conectado al gateway');
+    if (connected) { alerts.push('info', 'Conectado al gateway'); points.reload(); }
     else { setDot('st-ros', ''); setControl(false); }
   },
   onAuthLost: () => {
@@ -86,7 +82,10 @@ const handlers = {
   state: (msg) => onState(msg),
   map: (msg) => { map.setMap(msg); $('map-hint').classList.add('hidden'); },
   scan: (msg) => map.setScan(msg),
-  event: (msg) => alerts.push(msg.level, msg.message, msg.time),
+  event: (msg) => {
+    alerts.push(msg.level, msg.message, msg.time);
+    if (msg.code === 'points_changed') points.reload();
+  },
   notice: (msg) => alerts.push(msg.level, msg.message),
   error: (msg) => alerts.push('warning', msg.message),
 };
@@ -99,6 +98,19 @@ const map = new MapView($('map'), {
       alerts.push('warning', 'Sin conexión: el goal no se ha enviado');
     }
   },
+  onPoint: (g) => points.createPoint(g.x, g.y, g.yaw),
+});
+
+const points = new PointsPanel({
+  map,
+  send: (msg) => conn.send(msg),
+  notify: (level, text) => alerts.push(level, text),
+  getPose: () => lastState?.pose || null,
+});
+
+const camera = new ArmCamera({
+  box: $('cam-box'), img: $('cam-img'), msg: $('cam-msg'), info: $('cam-info'),
+  toggleBtn: $('btn-camera'), sizeBtn: $('cam-size'),
 });
 
 const teleop = new Teleop({
@@ -131,18 +143,44 @@ function onState(s) {
   if (p) map.setPose(p);
 
   const nav = s.nav || {};
+  const route = nav.mode === 'route' ? nav.route : null;
   setDot('st-route', s.route_running ? 'busy' : '');
-  $('st-route-txt').textContent = s.route_running
-    ? (nav.distance_remaining != null ? `${nav.distance_remaining.toFixed(1)} m` : 'iniciando')
-    : '';
+  $('st-route-txt').textContent = s.route_running ? routeStatusText(nav, route) : '';
 
+  camera.setStatus(s.camera);
   map.setGoal(nav.goal ? { ...nav.goal, state: nav.state } : null);
-  $('goal-info').textContent = nav.goal
-    ? `Goal x=${nav.goal.x.toFixed(2)} y=${nav.goal.y.toFixed(2)} ` +
-      `θ=${deg(nav.goal.yaw)}° · ${NAV_TEXT[nav.state] || nav.state}`
-    : 'Sin goal';
+  map.setRoute(route);
+  points.setNav(nav);
+  $('goal-info').textContent = goalInfoText(nav, route);
 
   renderControl(s.control);
+}
+
+function distText(nav) {
+  return nav.distance_remaining != null ? `${nav.distance_remaining.toFixed(1)} m` : '';
+}
+
+function routeStatusText(nav, route) {
+  if (!route) return distText(nav) || 'iniciando';
+  const step = `${route.name} ${Math.min(route.current + 1, route.total)}/${route.total}`;
+  if (route.phase === 'waiting') return `${step} · espera ${route.wait_remaining ?? ''}s`;
+  return `${step} · ${distText(nav) || 'iniciando'}`;
+}
+
+function goalInfoText(nav, route) {
+  if (route) {
+    const stop = route.stops[Math.min(route.current, route.total - 1)];
+    const where = route.phase === 'done' ? '' : ` · parada ${route.current + 1}/${route.total}: ${stop.name}`;
+    const skipped = route.skipped?.length ? ` · saltadas: ${route.skipped.join(', ')}` : '';
+    const stateText = nav.state === 'succeeded' ? 'completada' : (NAV_TEXT[nav.state] || nav.state);
+    return `Ruta ${route.name} · ${stateText}${where}` +
+      (route.phase === 'waiting' ? ` (esperando ${route.wait_remaining}s)` : '') + skipped;
+  }
+  if (nav.goal) {
+    return `Goal x=${nav.goal.x.toFixed(2)} y=${nav.goal.y.toFixed(2)} ` +
+      `θ=${deg(nav.goal.yaw)}° · ${NAV_TEXT[nav.state] || nav.state}`;
+  }
+  return 'Sin goal';
 }
 
 const NAV_TEXT = {

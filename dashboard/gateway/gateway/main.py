@@ -22,12 +22,19 @@ API HTTP
   DELETE /api/routes/{id}       (operador)
   Cualquier cambio emite un evento 'points_changed' para que los clientes recarguen.
 
+  Cámara del brazo (cualquier usuario con sesión)
+  GET    /api/camera/arm.mjpg   vídeo MJPEG (multipart/x-mixed-replace), para un <img>
+  GET    /api/camera/arm.jpg    último fotograma
+
 WebSocket /ws (requiere sesión; se cierra con código 4401 si no la hay)
 
   Gateway -> navegador
     {"type": "config", "limits": {...}, "user": {username, role}}      al conectar
     {"type": "state", "ros_ok", "pose", "nav", "route_running", "teleop_active",
      "nav2_ready", "control": {holder: {username, role, connected}|null, you, can_take}}
+       nav = {mode: 'goal'|'route'|None, state, goal: {x,y,yaw}|None, distance_remaining?,
+              route?: {id, name, total, current, phase: navigating|waiting|done,
+                       wait_remaining?, reached, skipped: [...], stops: [{name,x,y,yaw,wait_s}]}}
     {"type": "map", ...}  {"type": "scan", ...}
     {"type": "event", "id", "level", "code", "message", "time"}        para todos
     {"type": "notice", "level", "message"}                             solo para este cliente
@@ -38,6 +45,7 @@ WebSocket /ws (requiere sesión; se cierra con código 4401 si no la hay)
     {"type": "teleop", "vx", "vy", "wz"}                               requiere control
     {"type": "goal", "x", "y", "yaw"}                                  requiere control
     {"type": "cancel"}                                                 requiere control
+    {"type": "run_route", "route_id"}                                  requiere control
     {"type": "stop"}                                                   cualquier usuario
 
 Ejecución:
@@ -55,6 +63,7 @@ from urllib.parse import urlparse
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -235,6 +244,16 @@ async def lifespan(app):
 
 
 app = FastAPI(title='KMR iiwa gateway', lifespan=lifespan)
+
+
+@app.middleware('http')
+async def no_cache_web(request: Request, call_next):
+    """Que el navegador revalide siempre la web: tras actualizar archivos se
+    ven los cambios sin forzar la recarga (si no cambian, responde 304)."""
+    response = await call_next(request)
+    if not request.url.path.startswith('/api'):
+        response.headers['Cache-Control'] = 'no-cache'
+    return response
 
 
 # ---------------------------------------------------------------- sesiones HTTP
@@ -517,6 +536,45 @@ async def routes_delete(route_id: int, user=Depends(operator_user)):
     return {'ok': True}
 
 
+# ---------------------------------------------------------------- cámara
+@app.get('/api/camera/arm.jpg')
+async def camera_snapshot(user=Depends(current_user)):
+    _, jpeg = await asyncio.to_thread(bridge.get_camera_jpeg)
+    if jpeg is None:
+        raise HTTPException(503, 'sin imagen de la cámara')
+    return Response(jpeg, media_type='image/jpeg', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/api/camera/arm.mjpg')
+async def camera_stream(request: Request, user=Depends(current_user)):
+    token_hash = auth.token_hash(request.cookies.get(auth.SESSION_COOKIE, ''))
+    period = 1.0 / max(1.0, cfg.CAMERA_FPS)
+    log.info('Cámara: %s empieza a ver el vídeo', user['username'])
+
+    async def frames():
+        last_seq = -1
+        last_check = asyncio.get_running_loop().time()
+        try:
+            while not await request.is_disconnected():
+                now = asyncio.get_running_loop().time()
+                if now - last_check > 5.0:          # sesión caducada o usuario desactivado
+                    last_check = now
+                    if db.get_session_user(token_hash) is None:
+                        break
+                seq, jpeg = await asyncio.to_thread(bridge.get_camera_jpeg)
+                if jpeg is not None and seq != last_seq:
+                    last_seq = seq
+                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n'
+                           b'Content-Length: ' + str(len(jpeg)).encode() + b'\r\n\r\n'
+                           + jpeg + b'\r\n')
+                await asyncio.sleep(period)
+        finally:
+            log.info('Cámara: %s deja de ver el vídeo', user['username'])
+
+    return StreamingResponse(frames(), media_type='multipart/x-mixed-replace; boundary=frame',
+                             headers={'Cache-Control': 'no-store'})
+
+
 async def close_session_sockets(session):
     for client, ws in list(clients.values()):
         if client.session == session:
@@ -590,7 +648,7 @@ def _num(msg, key, default=None):
         raise CommandRejected(f"'{key}' debe ser un número")
 
 
-NEEDS_CONTROL = ('teleop', 'goal', 'cancel')
+NEEDS_CONTROL = ('teleop', 'goal', 'cancel', 'run_route')
 
 
 def handle_command(msg, client: Client):
@@ -621,6 +679,17 @@ def handle_command(msg, client: Client):
         bridge.send_goal(_num(msg, 'x'), _num(msg, 'y'), _num(msg, 'yaw', 0.0), who=who)
     elif kind == 'cancel':
         bridge.cancel_goal(who=who)
+    elif kind == 'run_route':
+        route_id = int(_num(msg, 'route_id'))
+        route = db.get_route(route_id)
+        if route is None:
+            raise CommandRejected(f'la ruta {route_id} no existe')
+        if route['map_name'] != cfg.MAP_NAME:
+            raise CommandRejected(f'la ruta {route["name"]!r} es del mapa {route["map_name"]!r}, '
+                                  f'no del activo ({cfg.MAP_NAME!r})')
+        if not route['executable']:
+            raise CommandRejected(f'la ruta {route["name"]!r} no tiene paradas')
+        bridge.run_route(route, who=who)
     else:
         raise CommandRejected(f'tipo de mensaje desconocido: {kind!r}')
 

@@ -16,6 +16,8 @@ from launch.substitutions import LaunchConfiguration, PythonExpression, PathJoin
 from launch_ros.actions import Node
 import xacro
 
+from launch_ros.parameter_descriptions import ParameterValue
+
 def generate_launch_description():
     pkg = get_package_share_directory('kuka_lab')
     ros_gz_sim = get_package_share_directory('ros_gz_sim')
@@ -132,6 +134,14 @@ def generate_launch_description():
                 "'/", LaunchConfiguration("robot_name"),
                 "/lidar_back_left@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'"
             ]),
+            PythonExpression([
+                "'/", LaunchConfiguration("robot_name"),
+                "/arm_camera/image@sensor_msgs/msg/Image[gz.msgs.Image'"
+            ]),
+            PythonExpression([
+                "'/", LaunchConfiguration("robot_name"),
+                "/arm_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo'"
+            ]),
         ],
         output="screen",
     )
@@ -144,7 +154,8 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {"use_sim_time": LaunchConfiguration("use_sim_time")},
-            {"robot_description": LaunchConfiguration("robot_desc")},
+            {"robot_description": ParameterValue(LaunchConfiguration("robot_desc"), value_type=str)},
+ 
         ],
         namespace=LaunchConfiguration("robot_name"),
     )

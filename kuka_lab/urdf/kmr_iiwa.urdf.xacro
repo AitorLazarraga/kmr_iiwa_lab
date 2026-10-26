@@ -76,6 +76,67 @@
   <!-- OPTION 3. virtual joints, virtual base system -->
   <xacro:virtual_base_system root_link="$(arg root_link)" base_link="$(arg base_name)_base_link"/>
 
+  <!-- ============================================================ -->
+  <!-- Cámara del brazo (paso 2.5)                                    -->
+  <!-- Montada en el extremo del iiwa, mirando en el eje de la        -->
+  <!-- herramienta (+Z de link_ee) y desplazada a un lado para que el -->
+  <!-- atornillador no la tape. La posición definitiva se fijará con  -->
+  <!-- el diseño de la brida (Fase 3): cambiar solo camera_xyz.        -->
+  <!-- ============================================================ -->
+  <xacro:property name="camera_xyz" value="0.07 0.0 0.0"/>
+
+  <link name="$(arg robot_name)_camera_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.03 0.06 0.03"/></geometry>
+      <material name="camera_black"><color rgba="0.1 0.1 0.1 1"/></material>
+    </visual>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
+    </inertial>
+  </link>
+
+  <!-- rpy 0 -pi/2 0: el eje X de la cámara (hacia donde mira en Gazebo)
+       queda alineado con el eje Z de la brida (eje de la herramienta) -->
+  <joint name="$(arg robot_name)_camera_joint" type="fixed">
+    <parent link="$(arg robot_name)_link_ee"/>
+    <child link="$(arg robot_name)_camera_link"/>
+    <origin xyz="${camera_xyz}" rpy="0 -1.5708 0"/>
+  </joint>
+
+  <!-- Optical frame (convención ROS para cámaras: z hacia delante,
+       x a la derecha, y hacia abajo). Lo usará la visión de la Fase 6. -->
+  <link name="$(arg robot_name)_camera_optical_frame"/>
+  <joint name="$(arg robot_name)_camera_optical_joint" type="fixed">
+    <parent link="$(arg robot_name)_camera_link"/>
+    <child link="$(arg robot_name)_camera_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+  </joint>
+
+  <gazebo reference="$(arg robot_name)_camera_link">
+    <sensor name="arm_camera" type="camera">
+      <pose relative_to="$(arg robot_name)_camera_link">0 0 0 0 0 0</pose>
+      <topic>$(arg robot_name)/arm_camera/image</topic>
+      <gz_frame_id>$(arg robot_name)_camera_optical_frame</gz_frame_id>
+      <update_rate>15</update_rate>
+      <always_on>1</always_on>
+      <visualize>true</visualize>
+      <camera>
+        <horizontal_fov>1.047</horizontal_fov>   <!-- 60° -->
+        <image>
+          <width>640</width>
+          <height>480</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.02</near>
+          <far>10.0</far>
+        </clip>
+      </camera>
+    </sensor>
+  </gazebo>
+
   <!-- Sensors -->
   <gazebo reference="$(arg base_name)_lidar_front_right_link">
   <sensor name="lidar_front_right" type="gpu_lidar">

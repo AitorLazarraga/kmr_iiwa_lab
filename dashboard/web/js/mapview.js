@@ -15,13 +15,22 @@ const COLORS = {
   goalActive: '#3d8bfd',
   goalFailed: '#e5484d',
   goalPreview: '#a9c9ff',
+  point: '#c792ea',
+  pointPreview: '#e2c2ff',
+  route: '#3d8bfd',
+  routeDone: '#6b7480',
+  label: '#1b1d20',
 };
 
 export class MapView {
-  constructor(canvas, { onGoal }) {
+  constructor(canvas, { onGoal, onPoint }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.onGoal = onGoal;
+    this.onPoint = onPoint;      // herramienta "Añadir punto"
+    this.points = [];            // puntos guardados del mapa activo
+    this.route = null;           // ruta en ejecución o terminada (state.nav.route)
+    this.highlight = null;       // id de punto resaltado desde el panel
 
     this.map = null;          // { info, image (canvas) }
     this.pose = null;         // { x, y, yaw }
@@ -77,6 +86,12 @@ export class MapView {
     if (!same) { this.goal = goal; this.dirty = true; }
   }
   setTool(tool) { this.tool = tool; this.preview = null; this.dirty = true; }
+  setPoints(points) { this.points = points || []; this.dirty = true; }
+  setRoute(route) {
+    const same = JSON.stringify(route) === JSON.stringify(this.route);
+    if (!same) { this.route = route; this.dirty = true; }
+  }
+  setHighlight(pointId) { this.highlight = pointId; this.dirty = true; }
 
   fitMap() {
     if (!this.map) return;
@@ -128,8 +143,12 @@ export class MapView {
       ctx.drawImage(this.map.image, sx, sy, m.width * size, m.height * size);
     }
     this._drawScan();
+    this._drawPoints();
+    this._drawRoute();
     if (this.goal) this._drawGoal(this.goal, this._goalColor(this.goal.state));
-    if (this.preview) this._drawGoal(this.preview, COLORS.goalPreview);
+    if (this.preview) {
+      this._drawGoal(this.preview, this.tool === 'point' ? COLORS.pointPreview : COLORS.goalPreview);
+    }
     this._drawRobot();
   }
 
@@ -147,6 +166,69 @@ export class MapView {
       const [sx, sy] = this.toScreen(pose.x + c * lx - s * ly, pose.y + s * lx + c * ly);
       ctx.fillRect(sx - r / 2, sy - r / 2, r, r);
     });
+  }
+
+  _drawPoints() {
+    const ctx = this.ctx;
+    const showLabels = this.view.scale > 18;
+    ctx.font = '12px system-ui, sans-serif';
+    for (const p of this.points) {
+      const [sx, sy] = this.toScreen(p.x, p.y);
+      const r = p.id === this.highlight ? 9 : 6;
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.fillStyle = COLORS.point;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = p.id === this.highlight ? 3 : 1.5;
+      ctx.beginPath();                                   // rombo
+      ctx.moveTo(0, -r); ctx.lineTo(r, 0); ctx.lineTo(0, r); ctx.lineTo(-r, 0); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.rotate(-p.yaw);                                // orientación
+      ctx.strokeStyle = COLORS.point; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(r, 0); ctx.lineTo(r + 9, 0); ctx.stroke();
+      ctx.restore();
+      if (showLabels || p.id === this.highlight) {
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = COLORS.label; ctx.lineWidth = 3;
+        ctx.strokeText(p.name, sx + 10, sy - 8);
+        ctx.fillText(p.name, sx + 10, sy - 8);
+      }
+    }
+  }
+
+  _drawRoute() {
+    const r = this.route;
+    if (!r || !r.stops || !r.stops.length) return;
+    const ctx = this.ctx;
+    const pts = r.stops.map((s) => this.toScreen(s.x, s.y));
+    const active = r.phase !== 'done';
+
+    // Parada i alcanzada: ya pasada, o es la actual y se está esperando en ella
+    const reached = (i) => !active || i < r.current || (i === r.current && r.phase === 'waiting');
+
+    // tramos: recorridos en gris, pendientes en azul discontinuo
+    ctx.lineWidth = 3;
+    for (let i = 1; i < pts.length; i++) {
+      const done = reached(i);
+      ctx.strokeStyle = done ? COLORS.routeDone : COLORS.route;
+      ctx.setLineDash(done ? [] : [8, 6]);
+      ctx.beginPath(); ctx.moveTo(...pts[i - 1]); ctx.lineTo(...pts[i]); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // paradas numeradas
+    ctx.font = 'bold 11px system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    pts.forEach(([sx, sy], i) => {
+      const isCurrent = active && i === r.current;
+      const visited = reached(i);
+      ctx.fillStyle = isCurrent ? COLORS.route : visited ? COLORS.routeDone : '#fff';
+      ctx.strokeStyle = COLORS.route; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(sx, sy, isCurrent ? 11 : 9, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = isCurrent || visited ? '#fff' : COLORS.route;
+      ctx.fillText(String(i + 1), sx, sy + 0.5);
+    });
+    ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
   }
 
   _drawRobot() {
@@ -200,7 +282,7 @@ export class MapView {
     c.addEventListener('pointerdown', (e) => {
       c.setPointerCapture(e.pointerId);
       this.pointers.set(e.pointerId, pos(e));
-      if (this.tool === 'goal' && this.pointers.size === 1) {
+      if ((this.tool === 'goal' || this.tool === 'point') && this.pointers.size === 1) {
         const [wx, wy] = this.toWorld(...pos(e));
         this.preview = { x: wx, y: wy, yaw: 0 };
         this.dirty = true;
@@ -222,7 +304,7 @@ export class MapView {
         this.preview = null;
         return;
       }
-      if (this.tool === 'goal' && this.preview) {  // arrastrar: orientación
+      if ((this.tool === 'goal' || this.tool === 'point') && this.preview) {  // arrastrar: orientación
         const [wx, wy] = this.toWorld(...now);
         const dx = wx - this.preview.x, dy = wy - this.preview.y;
         if (Math.hypot(dx, dy) * this.view.scale > 8) this.preview.yaw = Math.atan2(dy, dx);
@@ -237,11 +319,11 @@ export class MapView {
     const end = (e) => {
       if (!this.pointers.has(e.pointerId)) return;
       this.pointers.delete(e.pointerId);
-      if (this.tool === 'goal' && this.preview && this.pointers.size === 0) {
+      if ((this.tool === 'goal' || this.tool === 'point') && this.preview && this.pointers.size === 0) {
         const g = this.preview;
         this.preview = null;
         this.dirty = true;
-        this.onGoal(g);
+        (this.tool === 'goal' ? this.onGoal : this.onPoint)(g);
       }
     };
     c.addEventListener('pointerup', end);

@@ -36,12 +36,20 @@ SCAN_TOPIC = _env('SCAN_TOPIC', '/kmr_iiwa/scan')
 MAP_TOPIC = _env('MAP_TOPIC', '/map')
 NAV_ACTION = _env('NAV_ACTION', '/navigate_to_pose')
 
+CAMERA_TOPIC = _env('CAMERA_TOPIC', '/kmr_iiwa/arm_camera/image')
+
 MAP_FRAME = _env('MAP_FRAME', 'map')
 BASE_FRAME = _env('BASE_FRAME', 'kmp_base_link')
 
 # Nombre del mapa con el que trabaja el gateway. Los puntos y rutas guardados
 # pertenecen a un mapa: si se carga otro mapa en Nav2, lanzar con MAP_NAME=otro.
 MAP_NAME = _env('MAP_NAME', 'laboratorio')
+
+# Qué hacer si una parada de una ruta no se alcanza:
+#   'stop' -> la ruta se detiene ahí (recomendado para atornillar: no seguir
+#             si algo ha fallado)
+#   'skip' -> se salta esa parada y se continúa con la siguiente
+ROUTE_ON_FAILURE = _env('ROUTE_ON_FAILURE', 'stop')
 
 # --- Seguridad del movimiento ---------------------------------------------
 # Límites de teleoperación. Una orden por encima se RECHAZA (no se recorta).
@@ -62,6 +70,15 @@ ROS_STALE_TIMEOUT = _env_float('ROS_STALE_TIMEOUT', 1.0)  # s
 STATE_RATE = _env_float('STATE_RATE', 10.0)   # Hz: pose y estado de navegación
 SCAN_EVERY = int(_env('SCAN_EVERY', '2'))     # 1 de cada N envíos lleva scan
 SCAN_DOWNSAMPLE = int(_env('SCAN_DOWNSAMPLE', '3'))  # 1 de cada N haces
+
+# --- Cámara del brazo ---------------------------------------------------------
+# El vídeo va por HTTP (MJPEG en /api/camera/arm.mjpg), no por el WebSocket, para
+# no retrasar el estado ni las órdenes. Se comprime una vez por fotograma, solo
+# mientras alguien la está viendo.
+CAMERA_FPS = _env_float('CAMERA_FPS', 10.0)              # máximo enviado al navegador
+CAMERA_JPEG_QUALITY = int(_env('CAMERA_JPEG_QUALITY', '70'))
+CAMERA_MAX_WIDTH = int(_env('CAMERA_MAX_WIDTH', '640'))  # se reduce si llega más grande
+CAMERA_STALE_TIMEOUT = _env_float('CAMERA_STALE_TIMEOUT', 1.0)  # s sin imagen = sin cámara
 
 # --- Log --------------------------------------------------------------------
 LOG_FILE = _env('LOG_FILE', 'logs/gateway.log')
