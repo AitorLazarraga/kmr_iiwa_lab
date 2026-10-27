@@ -65,11 +65,12 @@ bt_navigator:
       search_window: 2.0
       transform_staleness_threshold: 0.0
     bt_search_directories:
+      - $(find-pkg-share kuka_nav)/behavior_trees
       - $(find-pkg-share nav2_bt_navigator)/behavior_trees
-    # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
-    # nav2_bt_navigator/navigate_to_pose_w_replanning_and_recovery.xml
-    # nav2_bt_navigator/navigate_through_poses_w_replanning_and_recovery.xml
-    # They can be set here or via a RewrittenYaml remap from a parent launch file to Nav2.
+    # Árboles propios (Fase 6.1): copia de los de Nav2 Jazzy SIN la recuperación
+    # BackUp, porque la plataforma no puede ir marcha atrás.
+    default_nav_to_pose_bt_xml: $(find-pkg-share kuka_nav)/behavior_trees/navigate_to_pose_kmr.xml
+    default_nav_through_poses_bt_xml: $(find-pkg-share kuka_nav)/behavior_trees/navigate_through_poses_kmr.xml
 
     # plugin_lib_names is used to add custom BT plugins to the executor (vector of strings).
     # Built-in plugins are added automatically
@@ -135,8 +136,25 @@ controller_server:
       inversion_yaw_tolerance: 0.4
       minimum_rotation_angle: 0.785
       reject_unit_path: false
+    # Fase 6.1 — navegación de tránsito "recta": el RotationShim gira el robot en
+    # el sitio hasta encararlo con la ruta (y al final con la orientación del
+    # objetivo) y luego cede el control a MPPI, que solo avanza de frente y gira
+    # (modelo DiffDrive, sin velocidad lateral ni marcha atrás).
+    # El movimiento omnidireccional se reserva para el acercamiento final (6.4),
+    # que no pasa por este controlador.
     FollowPath:
-      plugin: "nav2_mppi_controller::MPPIController"
+      plugin: "nav2_rotation_shim_controller::RotationShimController"
+      primary_controller: "nav2_mppi_controller::MPPIController"
+      angular_dist_threshold: 0.6          # rad (~35°): por encima, primero gira en el sitio
+      angular_disengage_threshold: 0.15    # rad (~9°): deja de girar y pasa a MPPI
+      forward_sampling_distance: 0.5       # m: punto de la ruta usado para la orientación
+      rotate_to_heading_angular_vel: 0.6   # rad/s
+      max_angular_accel: 1.5               # rad/s²
+      simulate_ahead_time: 1.0             # s: comprueba colisiones del giro
+      rotate_to_goal_heading: true         # al llegar, gira en el sitio a la orientación final
+      rotate_to_heading_once: false
+      closed_loop: true
+      # --- Parámetros del controlador primario (MPPI) ---
       time_steps: 56
       model_dt: 0.05
       model_delay_vx: 0.0
@@ -153,19 +171,17 @@ controller_server:
       vy_std: 0.2
       wz_std: 0.4
       vx_max: 0.5
-      vx_min: -0.35
-      vy_min: -0.5
-      vy_max: 0.5
-      wz_max: 1.9
+      vx_min: 0.0          # sin marcha atrás
+      vy_min: 0.0          # sin desplazamiento lateral en tránsito
+      vy_max: 0.0
+      wz_max: 1.0          # antes 1.9: giro más suave y predecible
       iteration_count: 1
       temperature: 0.3
       gamma: 0.015
       visualize: true
       publish_optimal_trajectory: true
       regenerate_noises: true
-      motion_model: "Omni"
-      diff_drive:
-        plugin: "mppi::OmniMotionModel"
+      motion_model: "DiffDrive"   # solo vx y wz (antes "Omni")
       TrajectoryVisualizer:
         trajectory_step: 5
         time_step: 3
@@ -200,7 +216,7 @@ controller_server:
         cost_weight: 3.0
         threshold_to_consider: 0.5
       PreferForwardCritic:
-        enabled: false #omni, sideways is fine
+        enabled: true      # penaliza ir hacia atrás
         cost_power: 1
         cost_weight: 5.0
         threshold_to_consider: 0.5
@@ -230,7 +246,7 @@ controller_server:
         offset_from_furthest: 5
         threshold_to_consider: 1.4
       PathAngleCritic:
-        enabled: false #omni, sideways is fine
+        enabled: true      # penaliza ir torcido respecto a la ruta
         cost_power: 1
         cost_weight: 2.0
         offset_from_furthest: 4
@@ -416,19 +432,13 @@ behavior_server:
     global_footprint_topic: global_costmap/published_footprint
     cycle_frequency: 10.0
     behavior_plugins:
-      ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
+      ["spin", "drive_on_heading", "assisted_teleop", "wait"]   # sin "backup": no hay marcha atrás
     spin:
       plugin: "nav2_behaviors::Spin"
       simulate_ahead_time: 2.0
       max_rotational_vel: 1.0
       min_rotational_vel: 0.4
       rotational_acc_lim: 3.2
-    backup:
-      plugin: "nav2_behaviors::BackUp"
-      simulate_ahead_time: 2.0
-      acceleration_limit: 2.5
-      deceleration_limit: -2.5
-      minimum_speed: 0.10
     drive_on_heading:
       plugin: "nav2_behaviors::DriveOnHeading"
       simulate_ahead_time: 2.0
@@ -487,8 +497,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: false
     feedback: "OPEN_LOOP"
-    max_velocity: [0.5, 0.5, 2.0]
-    min_velocity: [-0.5, -0.5, -2.0]
+    max_velocity: [0.5, 0.0, 1.0]    # [vx, vy, wz]: sin lateral en navegación
+    min_velocity: [0.0, 0.0, -1.0]   # sin marcha atrás
     max_accel: [3.0, 3.0, 3.5]
     max_decel: [-3.0, -3.0, -3.5]
     odom_topic: "/kmr_iiwa/odom"

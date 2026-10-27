@@ -6,6 +6,11 @@ e inserta los modelos estáticos descritos en el YAML justo antes de </world>.
 
 Uso:
     python3 generar_mundo.py laboratorio.yaml plantilla.world salida.world
+
+Además de paredes, cajas, mesas y cilindros admite paneles de atornillado
+(`screw_panels`): un tabique con una rejilla de huecos marcados en la cara de
+trabajo. Las posiciones de los huecos en coordenadas del mundo se guardan en
+<salida>_huecos.yaml (verdad de referencia para las Fases 6 y 7).
 """
 import argparse
 import math
@@ -18,6 +23,8 @@ COLORES = {
     'box': '0.55 0.45 0.35 1',
     'table': '0.60 0.50 0.40 1',
     'cylinder': '0.40 0.40 0.45 1',
+    'panel': '0.86 0.83 0.76 1',     # tablero claro, contrasta con las marcas
+    'hole': '0.08 0.08 0.08 1',      # hueco: disco oscuro
 }
 
 
@@ -94,6 +101,55 @@ def cilindro(c):
     return modelo(c['name'], x, y, c['height'] / 2, 0.0, cuerpo)
 
 
+def visual(nombre, geom, tipo, pose):
+    """Solo visual (sin colisión): las marcas no deben alterar el lidar ni la física."""
+    return f'        <visual name="{nombre}_vis"><pose>{pose}</pose>{geom}{material(tipo)}</visual>\n'
+
+
+def panel_atornillado(p, huecos_out):
+    """Tabique con una rejilla de huecos en la cara de trabajo.
+
+    center: centro de la base del panel [x, y]; yaw: grados.
+    Con yaw = 0 el panel va a lo largo de X y la cara de trabajo mira a +Y
+    (en general, la normal de la cara es (-sin(yaw), cos(yaw))).
+    holes: cols x rows, spacing [horizontal, vertical], bottom = altura de la
+    fila inferior (m), diameter (m). La rejilla se centra en horizontal.
+    """
+    ancho, grosor, alto = p['size']
+    x, y = p['center']
+    yaw = math.radians(p.get('yaw', 0))
+    h = p['holes']
+    cols, rows = h['cols'], h['rows']
+    sh, sv = h['spacing']
+    diam = h.get('diameter', 0.04)
+    z0 = h['bottom']
+
+    cuerpo = pieza('panel', geom_box(ancho, grosor, alto), 'panel', f'0 0 {alto / 2:.3f} 0 0 0')
+    disco = geom_cyl(diam / 2, 0.004)
+    nx, ny = -math.sin(yaw), math.cos(yaw)          # normal de la cara de trabajo
+    lista = []
+    for r in range(rows):
+        for c in range(cols):
+            u = (c - (cols - 1) / 2) * sh            # posición a lo largo del panel
+            z = z0 + r * sv
+            if abs(u) > ancho / 2 - diam or z > alto - diam:
+                raise ValueError(f"Panel '{p['name']}': el hueco ({c},{r}) se sale del panel")
+            nombre = f'hueco_f{r}_c{c}'
+            # cilindro con su eje a lo largo de +Y local (roll -90°), asomando 2 mm
+            cuerpo += visual(nombre, disco, 'hole',
+                             f'{u:.3f} {grosor / 2 + 0.002:.3f} {z:.3f} -1.5708 0 0')
+            # centro del hueco sobre la cara, en coordenadas del mundo
+            wx = x + u * math.cos(yaw) + (grosor / 2) * nx
+            wy = y + u * math.sin(yaw) + (grosor / 2) * ny
+            lista.append({'name': nombre, 'xyz': [round(wx, 4) + 0.0, round(wy, 4) + 0.0, round(z, 4)]})
+    huecos_out.append({
+        'panel': p['name'],
+        'normal': [round(nx, 4) + 0.0, round(ny, 4) + 0.0, 0.0],   # +0.0 evita '-0.0'   # sale de la cara de trabajo
+        'huecos': lista,
+    })
+    return modelo(p['name'], x, y, 0.0, yaw, cuerpo)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -105,7 +161,9 @@ def main():
     with open(args.descripcion) as f:
         d = yaml.safe_load(f)
 
-    generadores = [('walls', pared), ('boxes', caja), ('tables', mesa), ('cylinders', cilindro)]
+    huecos = []
+    generadores = [('walls', pared), ('boxes', caja), ('tables', mesa), ('cylinders', cilindro),
+                   ('screw_panels', lambda p: panel_atornillado(p, huecos))]
     nombres, bloques, cuenta = set(), [], {}
     for clave, fn in generadores:
         items = d.get(clave) or []
@@ -133,7 +191,18 @@ def main():
 
     print(f'Mundo generado: {args.salida}')
     for clave, n in cuenta.items():
-        print(f'  {clave:10s} {n}')
+        print(f'  {clave:12s} {n}')
+
+    if huecos:
+        ruta = args.salida.rsplit('.', 1)[0] + '_huecos.yaml'
+        with open(ruta, 'w') as f:
+            f.write('# Generado por generar_mundo.py: posición de cada hueco sobre la cara\n'
+                    '# de trabajo del panel (frame del mundo de Gazebo, m) y normal de la cara.\n')
+            yaml.safe_dump({'paneles': huecos}, f, sort_keys=False, allow_unicode=True,
+                           default_flow_style=None)
+        print(f'\nHuecos de atornillado: {ruta}')
+        for pnl in huecos:
+            print(f"  {pnl['panel']}: {len(pnl['huecos'])} huecos, cara hacia {pnl['normal'][:2]}")
 
     r = d.get('robot_inicio')
     if r:

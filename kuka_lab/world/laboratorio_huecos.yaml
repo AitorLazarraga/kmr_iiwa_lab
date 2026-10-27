@@ -1,0 +1,33 @@
+# Generado por generar_mundo.py: posición de cada hueco sobre la cara
+# de trabajo del panel (frame del mundo de Gazebo, m) y normal de la cara.
+paneles:
+- panel: panel_atornillado_este
+  normal: [0.0, 1.0, 0.0]
+  huecos:
+  - name: hueco_f0_c0
+    xyz: [26.2, 0.45, 1.0]
+  - name: hueco_f0_c1
+    xyz: [26.5, 0.45, 1.0]
+  - name: hueco_f0_c2
+    xyz: [26.8, 0.45, 1.0]
+  - name: hueco_f1_c0
+    xyz: [26.2, 0.45, 1.3]
+  - name: hueco_f1_c1
+    xyz: [26.5, 0.45, 1.3]
+  - name: hueco_f1_c2
+    xyz: [26.8, 0.45, 1.3]
+- panel: panel_atornillado_oeste
+  normal: [1.0, 0.0, 0.0]
+  huecos:
+  - name: hueco_f0_c0
+    xyz: [0.65, 1.9, 1.0]
+  - name: hueco_f0_c1
+    xyz: [0.65, 1.6, 1.0]
+  - name: hueco_f0_c2
+    xyz: [0.65, 1.3, 1.0]
+  - name: hueco_f1_c0
+    xyz: [0.65, 1.9, 1.3]
+  - name: hueco_f1_c1
+    xyz: [0.65, 1.6, 1.3]
+  - name: hueco_f1_c2
+    xyz: [0.65, 1.3, 1.3]

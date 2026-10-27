@@ -11,10 +11,15 @@ API HTTP
   GET    /api/health
 
   Puntos y rutas (del mapa activo cfg.MAP_NAME salvo ?map=<nombre> en los GET)
-  GET    /api/points            ?map=
-  POST   /api/points            (operador) {name, x, y, yaw}
-  PATCH  /api/points/{id}       (operador) {name?, x?, y?, yaw?}
+  GET    /api/points            ?map=   (los de trabajo llevan además x/y/yaw calculados y 'screws')
+  POST   /api/points            (operador) {name, x, y, yaw}            punto de MOVIMIENTO
+  POST   /api/points/work       (operador) {name, wall, distance?, grid?} punto de TRABAJO
+  POST   /api/points/work/preview          {wall, distance?, grid?} -> {x, y, yaw, screws} sin guardar
+  PATCH  /api/points/{id}       (operador) movimiento: {name?, x?, y?, yaw?}
+                                           trabajo:    {name?, wall?, distance?, grid?}
   DELETE /api/points/{id}       (operador)  -> quita el punto de las rutas que lo usan
+    wall = [[x1, y1], [x2, y2]]: cara de la pared, izquierda -> derecha vista desde el robot
+    grid = {cols, rows, spacing: [h, v], bottom}: rejilla de tornillos
   GET    /api/routes            ?map=
   GET    /api/routes/{id}
   POST   /api/routes            (operador) {name, stops: [{point_id, wait_s}, ...]}
@@ -74,14 +79,18 @@ from urllib.parse import urlparse
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from . import auth
 from . import config as cfg
 from .control import Client, ControlDenied, ControlManager
 from .db import Database
+from . import work as workgeo
 from .ros_bridge import CommandRejected, start_ros, stop_ros
 
 
@@ -96,6 +105,55 @@ clients = {}                       # client_id -> (Client, WebSocket)
 _client_ids = itertools.count(1)
 
 WS_CLOSE_AUTH = 4401
+
+# ---------------------------------------------------------------- puntos de trabajo (6.3)
+Coord = Annotated[float, Field(ge=-1000, le=1000)]           # m en el mapa; rechaza NaN/inf
+Spacing = Annotated[float, Field(ge=0.05, le=1.0)]           # m entre tornillos
+Wall = tuple[tuple[Coord, Coord], tuple[Coord, Coord]]       # exactamente 2 puntos [x, y]
+
+
+class GridIn(BaseModel):
+    """Rejilla de tornillos relativa a la pared (centrada en el tramo marcado)."""
+    model_config = ConfigDict(allow_inf_nan=False, extra='forbid')
+    cols: int = Field(default=3, ge=1, le=10)
+    rows: int = Field(default=2, ge=1, le=10)
+    spacing: tuple[Spacing, Spacing] = (0.30, 0.30)          # [horizontal, vertical]
+    bottom: float = Field(default=1.0, ge=0.3, le=cfg.WORK_MAX_HEIGHT)   # altura de la fila 0
+
+
+class WorkPreview(BaseModel):
+    """Datos de un punto de trabajo (sin nombre). Valida además la combinación."""
+    model_config = ConfigDict(allow_inf_nan=False, extra='forbid')
+    wall: Wall
+    distance: float = Field(default=cfg.WORK_DEFAULT_DISTANCE, ge=0.5, le=2.0)
+    grid: GridIn = Field(default_factory=GridIn)
+
+    @model_validator(mode='after')
+    def check_geometry(self):
+        # Un ValueError aquí se convierte en un 422 con este mensaje
+        workgeo.check(self.wall, self.distance, self.grid.model_dump())
+        return self
+
+    def work_dict(self):
+        """Lo que se guarda en la columna 'work' (listas, para JSON)."""
+        return {
+            'wall': [list(p) for p in self.wall],
+            'distance': self.distance,
+            'grid': {**self.grid.model_dump(), 'spacing': list(self.grid.spacing)},
+        }
+
+
+class WorkPointIn(WorkPreview):
+    name: str = Field(min_length=1, max_length=40)
+
+    @field_validator('name')
+    @classmethod
+    def clean_name(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError('el nombre no puede estar vacío')
+        return v
+
 
 class PointIn(BaseModel):
     name: str = Field(min_length=1, max_length=40)
@@ -119,10 +177,17 @@ class PointIn(BaseModel):
         return v
 
 class PointPatch(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
     name: str | None = Field(default=None, min_length=1, max_length=40)
+    # solo puntos de movimiento
     x: float | None = None
     y: float | None = None
     yaw: float | None = None
+    # solo puntos de trabajo (cada uno sustituye al guardado; grid se mezcla campo a campo).
+    # Sin validación conjunta aquí: el endpoint mezcla con lo guardado y revalida.
+    wall: Wall | None = None
+    distance: float | None = Field(default=None, ge=0.5, le=2.0)
+    grid: dict | None = None
 
     @field_validator('name')
     @classmethod
@@ -255,6 +320,15 @@ async def lifespan(app):
 
 
 app = FastAPI(title='KMR iiwa gateway', lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    """422 sin devolver la entrada recibida: el manejador por defecto la repite y,
+    si traía NaN/inf (que Pydantic rechaza bien), falla al convertirla a JSON."""
+    detail = [{'loc': list(e.get('loc', ())), 'msg': e.get('msg', ''), 'type': e.get('type', '')}
+              for e in exc.errors()]
+    return JSONResponse(status_code=422, content={'detail': detail})
 
 
 @app.middleware('http')
@@ -413,19 +487,64 @@ async def users_delete(user_id: int, admin=Depends(admin_user)):
     return {'ok': True}
 
 # ---------------------------------------------------------------- puntos
+def point_out(p):
+    """Punto tal como lo ve la web: los de trabajo llevan su geometría calculada."""
+    if p is not None and p.get('kind') == 'work' and p.get('work'):
+        geo = workgeo.geometry(p['work'])
+        p['screws'] = geo['screws']
+        p['wall_length'] = geo['wall_length']
+    return p
+
+
+def validation_message(e: ValidationError):
+    """Primer error de Pydantic en texto legible (para los 422 que lanzamos a mano)."""
+    err = e.errors()[0]
+    loc = '.'.join(str(x) for x in err.get('loc', ()))
+    msg = err.get('msg', 'datos no válidos').removeprefix('Value error, ')
+    return f'{loc}: {msg}' if loc else msg
+
+
 @app.post('/api/points', status_code=201)
 async def points_create(body: PointIn, user=Depends(operator_user)):
+    """Punto de MOVIMIENTO (clic y arrastrar en el mapa, o posición actual)."""
     try:
-        pid = db.create_point(body.name, cfg.MAP_NAME, body.x, body.y, body.yaw, user['id'])
+        pid = db.create_point(body.name, cfg.MAP_NAME, body.x, body.y, body.yaw, user['id'],
+                              kind='move')
     except sqlite3.IntegrityError:
         raise HTTPException(409, f'ya existe un punto llamado {body.name!r} en este mapa')
     log.info('PUNTO creado por %s: %s (%.2f, %.2f)', user['username'], body.name, body.x, body.y)
     bridge.emit('info', 'points_changed', f'{user["username"]} ha creado el punto {body.name}')
-    return db.get_point(pid)
+    return point_out(db.get_point(pid))
+
+
+@app.post('/api/points/work/preview')
+async def points_work_preview(body: WorkPreview, user=Depends(current_user)):
+    """Pose de llegada y tornillos calculados, SIN guardar (vista previa en la web)."""
+    return workgeo.geometry(body.work_dict())
+
+
+@app.post('/api/points/work', status_code=201)
+async def points_work_create(body: WorkPointIn, user=Depends(operator_user)):
+    """Punto de TRABAJO: la pose de llegada se calcula a partir de la pared."""
+    work = body.work_dict()
+    x, y, yaw = workgeo.approach_pose(work['wall'], work['distance'])
+    try:
+        pid = db.create_point(body.name, cfg.MAP_NAME, x, y, yaw, user['id'],
+                              kind='work', work=work)
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, f'ya existe un punto llamado {body.name!r} en este mapa')
+    g = work['grid']
+    log.info('PUNTO DE TRABAJO creado por %s: %s pared %s, d=%.2f, rejilla %dx%d -> (%.2f, %.2f, %.0f°)',
+             user['username'], body.name, work['wall'], work['distance'], g['cols'], g['rows'],
+             x, y, math.degrees(yaw))
+    bridge.emit('info', 'points_changed',
+                f'{user["username"]} ha creado el punto de trabajo {body.name}')
+    return point_out(db.get_point(pid))
+
 
 @app.get('/api/points')
 async def get_points(map:str | None = None, user=Depends(current_user)):
-    return db.list_points(map or cfg.MAP_NAME)
+    return [point_out(p) for p in db.list_points(map or cfg.MAP_NAME)]
 
 @app.patch('/api/points/{point_id}')
 async def change_points(point_id:int, body: PointPatch, user=Depends(operator_user)):
@@ -435,15 +554,41 @@ async def change_points(point_id:int, body: PointPatch, user=Depends(operator_us
     changes = body.model_dump(exclude_unset=True, exclude_none=True)
     if not changes:
         raise HTTPException(400, 'No datos de cambio')
+
+    work_keys = {'wall', 'distance', 'grid'} & changes.keys()
+    pose_keys = {'x', 'y', 'yaw'} & changes.keys()
+    if target['kind'] == 'move' and work_keys:
+        raise HTTPException(400, f'un punto de movimiento no tiene {", ".join(sorted(work_keys))}')
+    if target['kind'] == 'work' and pose_keys:
+        raise HTTPException(400, 'la pose de un punto de trabajo se calcula a partir de la pared: '
+                                 'cambia wall o distance')
+
+    update = {k: changes[k] for k in ('name', 'x', 'y', 'yaw') if k in changes}
+    if work_keys:
+        # Mezclar lo nuevo con lo guardado y revalidar el conjunto completo
+        old = target['work']
+        merged = {
+            'wall': changes.get('wall', old['wall']),
+            'distance': changes.get('distance', old['distance']),
+            'grid': {**old['grid'], **changes.get('grid', {})},
+        }
+        try:
+            data = WorkPreview(**merged)
+        except ValidationError as e:
+            raise HTTPException(422, validation_message(e))
+        work = data.work_dict()
+        update['x'], update['y'], update['yaw'] = workgeo.approach_pose(work['wall'], work['distance'])
+        update['work'] = work
+
     try:
-        db.update_point(point_id, **changes)
+        db.update_point(point_id, **update)
     except sqlite3.IntegrityError:
         raise HTTPException(409, 'Ya existe un punto con este nombre')
-    
+
     log.info('PUNTO %s modificado por %s: %s', target['name'], user['username'], changes)
     bridge.emit('info', 'points_changed',
                 f'{user["username"]} ha modificado el punto {changes.get("name", target["name"])}')
-    return db.get_point(point_id)
+    return point_out(db.get_point(point_id))
 
 @app.delete('/api/points/{point_id}')
 async def points_delete(point_id: int, user=Depends(operator_user)):

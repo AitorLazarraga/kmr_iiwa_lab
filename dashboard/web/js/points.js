@@ -1,11 +1,20 @@
-// Panel "Puntos y rutas": lista de puntos, lista de rutas, editor de rutas.
+// Panel "Puntos y rutas": lista de puntos, lista de rutas, editor de rutas y
+// editor de puntos de trabajo.
 // Los datos se piden por la API REST y se recargan cuando el gateway avisa
 // con un evento 'points_changed' (lo hace main.js llamando a reload()).
+//
+// Dos tipos de punto:
+//   movimiento ('move'): pose a la que ir. Se crea pulsando y arrastrando en el mapa.
+//   trabajo    ('work'): frente a una pared. Se crea arrastrando sobre la cara de
+//              la pared; la pose de llegada y los tornillos los calcula el gateway.
 
 import { api } from './api.js';
 
 const fmt = (v) => Number(v).toFixed(2);
 const deg = (rad) => Math.round(rad * 180 / Math.PI);
+const ICON = { move: '◆', work: '▣' };
+const DEFAULT_WORK = { distance: 1.0, grid: { cols: 3, rows: 2, spacing: [0.30, 0.30], bottom: 1.0 } };
+const PREVIEW_DELAY_MS = 200;
 
 export class PointsPanel {
   /**
@@ -14,16 +23,21 @@ export class PointsPanel {
    *   send      (msg) => bool, envío por WebSocket
    *   notify    (level, text) => void, barra de avisos
    *   getPose   () => {x, y, yaw} | null, pose actual del robot
+   *   setTool   (tool) => void, cambia la herramienta del mapa (barra de herramientas)
    */
-  constructor({ map, send, notify, getPose }) {
+  constructor({ map, send, notify, getPose, setTool }) {
     this.map = map;
     this.send = send;
     this.notify = notify;
     this.getPose = getPose;
+    this.setTool = setTool;
     this.points = [];
     this.routes = [];
     this.nav = null;            // state.nav, para marcar la ruta en curso
     this.editing = null;        // { id|null, name, stops: [{point_id, wait_s}] }
+    this.work = null;           // editor de punto de trabajo: { id|null, name, wall, distance, grid }
+    this.previewTimer = null;
+    this.previewSeq = 0;        // descarta respuestas de vistas previas antiguas
 
     this.$ = (id) => document.getElementById(id);
     this._bind();
@@ -74,6 +88,124 @@ export class PointsPanel {
     const p = this.getPose();
     if (!p) { this.notify('warning', 'No hay pose del robot todavía'); return; }
     await this.createPoint(p.x, p.y, p.yaw);
+  }
+
+  // ------------------------------------------------------------ puntos de trabajo
+  /** La herramienta 'work' del mapa ha marcado una pared. */
+  onWall(wall) {
+    if (this.work) {                       // editor abierto: "Remarcar pared"
+      this.work.wall = wall;
+    } else {
+      this.work = { id: null, name: '', wall, ...structuredClone(DEFAULT_WORK) };
+    }
+    this.setTool('pan');
+    this._showTab('points');
+    this._renderWorkEditor();
+    this._schedulePreview(0);
+  }
+
+  editWorkPoint(pt) {
+    this.work = {
+      id: pt.id, name: pt.name, wall: pt.work.wall,
+      distance: pt.work.distance, grid: structuredClone(pt.work.grid),
+    };
+    this._showTab('points');
+    this._renderWorkEditor();
+    this._schedulePreview(0);
+  }
+
+  closeWorkEditor() {
+    this.work = null;
+    clearTimeout(this.previewTimer);
+    this.map.setWorkPreview(null);
+    if (this.map.tool === 'work') this.setTool('pan');
+    this._renderWorkEditor();
+  }
+
+  /** Lee el formulario al estado del editor (los rangos los valida el gateway). */
+  _readWorkForm() {
+    const w = this.work;
+    const num = (id) => parseFloat(this.$(id).value);
+    const int = (id) => parseInt(this.$(id).value, 10);
+    w.name = this.$('we-name').value;
+    w.distance = num('we-distance');
+    w.grid = {
+      cols: int('we-cols'), rows: int('we-rows'),
+      spacing: [num('we-sh'), num('we-sv')], bottom: num('we-bottom'),
+    };
+  }
+
+  _workBody() {
+    const w = this.work;
+    return { wall: w.wall, distance: w.distance, grid: w.grid };
+  }
+
+  _schedulePreview(delay = PREVIEW_DELAY_MS) {
+    clearTimeout(this.previewTimer);
+    this.previewTimer = setTimeout(() => this._preview(), delay);
+  }
+
+  async _preview() {
+    if (!this.work) return;
+    const seq = ++this.previewSeq;
+    const w = this.work;
+    const r = await api('/api/points/work/preview', {
+      method: 'POST', body: JSON.stringify(this._workBody()),
+    });
+    if (seq !== this.previewSeq || !this.work) return;      // llegó otra más nueva
+    const msg = this.$('we-msg');
+    if (!r.ok) {
+      this.map.setWorkPreview({ wall: w.wall, error: true });
+      msg.textContent = r.error;
+      msg.className = 'we-msg bad';
+      this.$('we-save').disabled = true;
+      return;
+    }
+    const g = r.body;
+    const hits = this.map.footprintHits(g.x, g.y, g.yaw);
+    const bad = hits !== null && hits > 0;
+    this.map.setWorkPreview({ wall: w.wall, ...g, bad });
+    const n = g.screws.length;
+    msg.textContent = (bad
+      ? `⚠ La pose de llegada pisa ${hits} celda${hits === 1 ? '' : 's'} ocupada${hits === 1 ? '' : 's'} del mapa. `
+        + 'Revisa el lado de la pared (⇄) o la distancia. '
+      : '')
+      + `Pared ${fmt(g.wall_length)} m · ${n} tornillo${n === 1 ? '' : 's'} · `
+      + `llegada x ${fmt(g.x)}, y ${fmt(g.y)}, θ ${deg(g.yaw)}°`;
+    msg.className = 'we-msg' + (bad ? ' warn' : '');
+    this.$('we-save').disabled = false;
+  }
+
+  async saveWorkPoint() {
+    this._readWorkForm();
+    const w = this.work;
+    const name = w.name.trim();
+    if (!name) { this.notify('warning', 'El punto de trabajo necesita un nombre'); return; }
+    const body = JSON.stringify({ name, ...this._workBody() });
+    const r = w.id === null
+      ? await api('/api/points/work', { method: 'POST', body })
+      : await api(`/api/points/${w.id}`, { method: 'PATCH', body });
+    if (!r.ok) { this.notify('warning', `No se pudo guardar el punto de trabajo: ${r.error}`); return; }
+    this.closeWorkEditor();
+  }
+
+  _renderWorkEditor() {
+    const w = this.work;
+    this.$('work-editor').classList.toggle('hidden', !w);
+    this.$('points-list').classList.toggle('hidden', !!w);
+    this.$('pp-points-actions').classList.toggle('hidden', !!w);
+    if (!w) return;
+    this.$('we-title').textContent = w.id === null ? 'Nuevo punto de trabajo' : 'Editar punto de trabajo';
+    const set = (id, v) => { if (document.activeElement !== this.$(id)) this.$(id).value = v; };
+    set('we-name', w.name);
+    set('we-distance', w.distance);
+    set('we-cols', w.grid.cols);
+    set('we-rows', w.grid.rows);
+    set('we-sh', w.grid.spacing[0]);
+    set('we-sv', w.grid.spacing[1]);
+    set('we-bottom', w.grid.bottom);
+    const [[x1, y1], [x2, y2]] = w.wall;
+    this.$('we-wall').textContent = `Pared: (${fmt(x1)}, ${fmt(y1)}) → (${fmt(x2)}, ${fmt(y2)})`;
   }
 
   async renamePoint(pt) {
@@ -145,12 +277,19 @@ export class PointsPanel {
       return;
     }
     for (const pt of this.points) {
-      const item = li('pp-item');
+      const work = pt.kind === 'work';
+      const item = li('pp-item kind-' + (work ? 'work' : 'move'));
+      const sub = work && pt.work
+        ? `pared ${fmt(pt.wall_length)} m · ${pt.work.grid.cols}×${pt.work.grid.rows} tornillos · a ${fmt(pt.work.distance)} m`
+        : `x ${fmt(pt.x)} · y ${fmt(pt.y)} · θ ${deg(pt.yaw)}°`;
       item.append(
-        info(pt.name, `x ${fmt(pt.x)} · y ${fmt(pt.y)} · θ ${deg(pt.yaw)}°`),
+        info(`${ICON[pt.kind] || ICON.move} ${pt.name}`, sub),
         actions(
-          button('Ir', 'needs-control', () => this.goToPoint(pt), 'Navegar a este punto'),
-          button('✎', 'needs-operator', () => this.renamePoint(pt), 'Renombrar'),
+          button('Ir', 'needs-control', () => this.goToPoint(pt),
+            work ? 'Navegar a la pose de llegada frente a la pared' : 'Navegar a este punto'),
+          work
+            ? button('✎', 'needs-operator', () => this.editWorkPoint(pt), 'Editar pared, distancia y rejilla')
+            : button('✎', 'needs-operator', () => this.renamePoint(pt), 'Renombrar'),
           button('✕', 'needs-operator danger-text', () => this.deletePoint(pt), 'Borrar'),
         ),
       );
@@ -232,7 +371,7 @@ export class PointsPanel {
     const sel = this.$('re-point');
     sel.replaceChildren(...this.points.map((p) => {
       const o = document.createElement('option');
-      o.value = p.id; o.textContent = p.name;
+      o.value = p.id; o.textContent = `${ICON[p.kind] || ICON.move} ${p.name}`;
       return o;
     }));
     this.$('re-add-btn').disabled = !this.points.length;
@@ -265,6 +404,31 @@ export class PointsPanel {
     });
     this.$('re-save').addEventListener('click', () => this.saveRoute());
     this.$('re-cancel').addEventListener('click', () => { this.editing = null; this._renderEditor(); });
+
+    // editor de puntos de trabajo
+    for (const id of ['we-distance', 'we-cols', 'we-rows', 'we-sh', 'we-sv', 'we-bottom']) {
+      this.$(id).addEventListener('input', () => {
+        if (!this.work) return;
+        this._readWorkForm();
+        this._schedulePreview();
+      });
+    }
+    this.$('we-name').addEventListener('input', (ev) => { if (this.work) this.work.name = ev.target.value; });
+    this.$('we-flip').addEventListener('click', () => {
+      if (!this.work) return;
+      this._readWorkForm();
+      this.work.wall = [this.work.wall[1], this.work.wall[0]];
+      this._renderWorkEditor();
+      this._schedulePreview(0);
+    });
+    this.$('we-remark').addEventListener('click', () => {
+      if (!this.work) return;
+      this._readWorkForm();
+      this.setTool('work');
+      this.notify('info', 'Arrastra sobre la cara de la pared, de izquierda a derecha vista desde donde quedará el robot');
+    });
+    this.$('we-save').addEventListener('click', () => this.saveWorkPoint());
+    this.$('we-cancel').addEventListener('click', () => this.closeWorkEditor());
   }
 }
 

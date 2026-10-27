@@ -43,3 +43,24 @@ tables:
 # Columnas y objetos redondos
 # cylinders:
 #  - {name: columna_1, center: [6.0, 1.5], radius: 0.25, height: 2.5}
+
+# Paneles de atornillado (Fase 6.2): tabiques de prueba con una rejilla de huecos
+# en la cara de trabajo. center = centro de la base; size = [ancho, grosor, alto];
+# yaw en grados: con yaw 0 el panel va a lo largo de X y su cara mira a +Y
+# (normal de la cara = (-sin yaw, cos yaw)).
+# holes: rejilla cols x rows centrada en horizontal; spacing = [horizontal, vertical];
+# bottom = altura de la fila inferior. Alturas elegidas para que el brazo llegue
+# con holgura con la herramienta perpendicular a la pared.
+screw_panels:
+  # Hueco libre a la derecha de cosas_tiradas (entre x 25 y 28): cara hacia el norte (+Y)
+  - name: panel_atornillado_este
+    center: [26.5, 0.4]
+    yaw: 0
+    size: [2.0, 0.1, 2.2]
+    holes: {cols: 3, rows: 2, spacing: [0.30, 0.30], bottom: 1.0, diameter: 0.04}
+  # Hueco libre a la izquierda de cosas_tiradas (entre x 0 y 6): cara hacia el este (+X)
+  - name: panel_atornillado_oeste
+    center: [0.6, 1.6]
+    yaw: -90
+    size: [2.0, 0.1, 2.2]
+    holes: {cols: 3, rows: 2, spacing: [0.30, 0.30], bottom: 1.0, diameter: 0.04}

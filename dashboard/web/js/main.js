@@ -102,6 +102,7 @@ const map = new MapView($('map'), {
     }
   },
   onPoint: (g) => points.createPoint(g.x, g.y, g.yaw),
+  onWork: (wall) => points.onWall(wall),
 });
 
 const points = new PointsPanel({
@@ -109,6 +110,7 @@ const points = new PointsPanel({
   send: (msg) => conn.send(msg),
   notify: (level, text) => alerts.push(level, text),
   getPose: () => lastState?.pose || null,
+  setTool: (tool) => selectTool(tool),
 });
 
 const camera = new ArmCamera({
@@ -278,12 +280,17 @@ $('btn-clear-goal').addEventListener('click', () => conn.send({ type: 'cancel' }
 $('btn-center').addEventListener('click', () => map.centerRobot());
 $('btn-fit').addEventListener('click', () => map.fitMap());
 
+/** Herramienta del mapa: botones de la barra y también desde el panel de puntos. */
+function selectTool(tool) {
+  document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === tool));
+  map.setTool(tool);
+  const panel = document.querySelector('.map-panel');
+  panel.classList.toggle('tool-goal', tool === 'goal' || tool === 'point');
+  panel.classList.toggle('tool-work', tool === 'work');
+  $('map-tip').classList.toggle('hidden', tool !== 'work');
+}
 document.querySelectorAll('[data-tool]').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b === btn));
-    map.setTool(btn.dataset.tool);
-    document.querySelector('.map-panel').classList.toggle('tool-goal', btn.dataset.tool === 'goal');
-  });
+  btn.addEventListener('click', () => selectTool(btn.dataset.tool));
 });
 
 document.querySelectorAll('[data-speed]').forEach((btn) => {

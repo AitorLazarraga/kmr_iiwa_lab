@@ -78,7 +78,8 @@
       </link>
     </model>
   
-    <!-- ===== Generado por generar_mundo.py a partir de tools/laboratorio.yaml ===== -->
+  
+    <!-- ===== Generado por generar_mundo.py a partir de laboratorio.yaml ===== -->
     <!-- Origen: Esquina SO, junto a la puerta principal -->
     <model name="pared_larga">
       <static>true</static>
@@ -222,6 +223,34 @@
         <visual name="pata2_vis"><pose>-3.975 0.375 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
         <collision name="pata3_col"><pose>-3.975 -0.375 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
         <visual name="pata3_vis"><pose>-3.975 -0.375 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="panel_atornillado_este">
+      <static>true</static>
+      <pose>26.500 0.400 0.000 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="panel_col"><pose>0 0 1.100 0 0 0</pose><geometry><box><size>2.000 0.100 2.200</size></box></geometry></collision>
+        <visual name="panel_vis"><pose>0 0 1.100 0 0 0</pose><geometry><box><size>2.000 0.100 2.200</size></box></geometry><material><ambient>0.86 0.83 0.76 1</ambient><diffuse>0.86 0.83 0.76 1</diffuse></material></visual>
+        <visual name="hueco_f0_c0_vis"><pose>-0.300 0.052 1.000 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f0_c1_vis"><pose>0.000 0.052 1.000 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f0_c2_vis"><pose>0.300 0.052 1.000 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f1_c0_vis"><pose>-0.300 0.052 1.300 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f1_c1_vis"><pose>0.000 0.052 1.300 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f1_c2_vis"><pose>0.300 0.052 1.300 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="panel_atornillado_oeste">
+      <static>true</static>
+      <pose>0.600 1.600 0.000 0 0 -1.5708</pose>
+      <link name="link">
+        <collision name="panel_col"><pose>0 0 1.100 0 0 0</pose><geometry><box><size>2.000 0.100 2.200</size></box></geometry></collision>
+        <visual name="panel_vis"><pose>0 0 1.100 0 0 0</pose><geometry><box><size>2.000 0.100 2.200</size></box></geometry><material><ambient>0.86 0.83 0.76 1</ambient><diffuse>0.86 0.83 0.76 1</diffuse></material></visual>
+        <visual name="hueco_f0_c0_vis"><pose>-0.300 0.052 1.000 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f0_c1_vis"><pose>0.000 0.052 1.000 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f0_c2_vis"><pose>0.300 0.052 1.000 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f1_c0_vis"><pose>-0.300 0.052 1.300 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f1_c1_vis"><pose>0.000 0.052 1.300 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f1_c2_vis"><pose>0.300 0.052 1.300 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
       </link>
     </model>
   </world>

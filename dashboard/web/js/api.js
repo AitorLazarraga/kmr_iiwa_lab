@@ -16,7 +16,11 @@ function errorText(status, body) {
   if (!body || status < 400) return null;
   if (typeof body.detail === 'string') return body.detail;
   if (Array.isArray(body.detail)) {          // 422: errores de validación
-    return body.detail.map((d) => `${(d.loc || []).slice(1).join('.')}: ${d.msg}`).join('; ');
+    return body.detail.map((d) => {
+      const loc = (d.loc || []).slice(1).join('.');          // sin el 'body' inicial
+      const msg = String(d.msg || '').replace(/^Value error, /, '');
+      return loc ? `${loc}: ${msg}` : msg;
+    }).join('; ');
   }
   return `Error ${status}`;
 }

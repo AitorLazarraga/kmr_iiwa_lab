@@ -1,0 +1,25 @@
+# Goal
+geometry_msgs/Point wall_p1 #Extremo1 Pared
+geometry_msgs/Point wall_p2 #Extremo2 Pared
+float64 distance #Distancia entre robot y pared
+float64 lateral 0.0 #Distancia brazo pared
+
+---
+
+# Result
+
+bool success #Correcto no Correcto
+string message #Mensaje en caso de fallo
+float64 final_distance_error #Error distancia
+float64 final_lateral_error #Error lateral
+float64 final_angle_error #Error angular
+
+---
+
+# Feedback
+
+string phase #Medir, Corregir, Estable
+float64 distance_error
+float64 lateral_error
+float64 angle_error
+int32 wall_points #Cantidad de puntos que encajan en la recta

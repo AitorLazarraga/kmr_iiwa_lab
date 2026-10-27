@@ -90,7 +90,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .map-wrap { position: relative; flex: 1; min-height: 0; }
 #map { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
 .map-hint { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
-.map-panel.tool-goal #map { cursor: crosshair; }
+.map-panel.tool-goal #map, .map-panel.tool-work #map { cursor: crosshair; }
+.map-tip { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px);
+  background: rgba(17, 20, 24, .88); border: 1px solid #ff9f43; color: var(--text); border-radius: 8px;
+  padding: 6px 10px; font-size: 12px; text-align: center; pointer-events: none; z-index: 3; }
 .goal-info { padding: 6px 10px; border-top: 1px solid var(--line); font-family: var(--mono);
   font-size: 12px; color: var(--muted); }
 
@@ -248,7 +251,7 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 
 .route-editor { display: flex; flex-direction: column; gap: 8px; }
 .re-title { font-weight: 600; }
-.route-editor input, .route-editor select { font: inherit; color: var(--text); background: var(--bg);
+.route-editor input, .route-editor select, .work-editor input { font: inherit; color: var(--text); background: var(--bg);
   border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
 .re-head { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px;
   padding: 0 4px; text-transform: uppercase; letter-spacing: .06em; }
@@ -300,3 +303,16 @@ body.no-control .needs-control { opacity: .35; pointer-events: none; }
   .keys { display: none; }
   .joy { --size: 150px; }
 }
+
+/* ---------- Puntos de trabajo (6.3) ---------- */
+.pp-item.kind-work .pp-info b { color: #4fd1a5; }
+.work-editor { display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; }
+.work-editor #we-name { width: 100%; }
+.we-wall { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.we-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+.we-grid label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.we-grid input { width: 100%; }
+.we-msg { font-size: 12px; color: var(--muted); min-height: 1.4em; }
+.we-msg.warn { color: var(--warn); }
+.we-msg.bad { color: var(--danger); }
+.work-editor .re-buttons { flex-wrap: wrap; }

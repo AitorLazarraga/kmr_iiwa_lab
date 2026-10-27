@@ -88,6 +88,14 @@ ARM_MAX_TRACKING_ERROR = math.radians(_env_float('ARM_MAX_TRACKING_ERROR_DEG', 6
 ARM_MOVE_MAX_VEL = math.radians(_env_float('ARM_MOVE_MAX_VEL_DEG', 20.0))  # rad/s
 ARM_MOVE_MIN_TIME = _env_float('ARM_MOVE_MIN_TIME', 1.5)                    # s
 
+# --- Puntos de trabajo (Fase 6.3) ---------------------------------------------
+# Distancia por defecto del frontal del robot a la cara de la pared. Con la
+# herramienta perpendicular a la pared, el análisis de alcance da ~1,0 m.
+WORK_DEFAULT_DISTANCE = _env_float('WORK_DEFAULT_DISTANCE', 1.0)        # m
+WORK_MAX_HEIGHT = _env_float('WORK_MAX_HEIGHT', 1.8)                    # m, fila superior
+BASE_HALF_LENGTH = 0.54        # m: del centro de la KMP 200 a su frontal
+ARM_OFFSET_Y = -0.1842         # m: el brazo está a la derecha del centro (eje Y de la base)
+
 # --- Seguridad del movimiento ---------------------------------------------
 # Límites de teleoperación. Una orden por encima se RECHAZA (no se recorta).
 MAX_VX = _env_float('MAX_VX', 0.5)    # m/s

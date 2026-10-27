@@ -1,5 +1,9 @@
-// Vista 2D del mapa: mapa de ocupación, robot, scan y goal.
+// Vista 2D del mapa: mapa de ocupación, robot, scan, goal, puntos y rutas.
 // Coordenadas: todo en el frame "map" (metros, y hacia arriba).
+//
+// Herramientas: 'pan' (mover la vista), 'goal' y 'point' (pulsar y arrastrar
+// para orientar) y 'work' (arrastrar sobre la cara de una pared, de izquierda a
+// derecha vista desde donde se colocará el robot -> onWork([[x1,y1],[x2,y2]])).
 
 const ROBOT_LENGTH = 1.08;   // m (KMP 200)
 const ROBOT_WIDTH = 0.63;    // m
@@ -20,14 +24,22 @@ const COLORS = {
   route: '#3d8bfd',
   routeDone: '#6b7480',
   label: '#1b1d20',
+  work: '#4fd1a5',          // puntos de trabajo
+  workWall: '#ff9f43',      // cara de pared marcada
+  screw: '#ffd166',
+  workBad: '#e5484d',
 };
+const OCCUPIED = 65;          // umbral de celda ocupada (igual que el dibujo)
 
 export class MapView {
-  constructor(canvas, { onGoal, onPoint }) {
+  constructor(canvas, { onGoal, onPoint, onWork }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.onGoal = onGoal;
-    this.onPoint = onPoint;      // herramienta "Añadir punto"
+    this.onPoint = onPoint;      // herramienta "Punto de movimiento"
+    this.onWork = onWork;        // herramienta "Punto de trabajo" (marcar pared)
+    this.wallDraft = null;       // { p1, p2 } mientras se arrastra sobre la pared
+    this.workPreview = null;     // { wall, x, y, yaw, screws, bad } del editor de puntos de trabajo
     this.points = [];            // puntos guardados del mapa activo
     this.route = null;           // ruta en ejecución o terminada (state.nav.route)
     this.highlight = null;       // id de punto resaltado desde el panel
@@ -73,8 +85,11 @@ export class MapView {
       }
     }
     octx.putImageData(img, 0, 0);
+    // Valores crudos (fila 0 = y mínima) para comprobar colisiones de una pose
+    const grid = new Int8Array(width * height);
+    for (let i = 0; i < grid.length; i++) grid[i] = raw.charCodeAt(i);
     const first = !this.map;
-    this.map = { info: msg, image: off };
+    this.map = { info: msg, image: off, grid };
     if (first) this.fitMap();
     this.dirty = true;
   }
@@ -85,7 +100,36 @@ export class MapView {
     const same = JSON.stringify(goal) === JSON.stringify(this.goal);
     if (!same) { this.goal = goal; this.dirty = true; }
   }
-  setTool(tool) { this.tool = tool; this.preview = null; this.dirty = true; }
+  setTool(tool) { this.tool = tool; this.preview = null; this.wallDraft = null; this.dirty = true; }
+  setWorkPreview(preview) { this.workPreview = preview; this.dirty = true; }
+
+  /**
+   * Celdas ocupadas del mapa bajo la huella del robot en una pose (0 = libre).
+   * Celdas desconocidas no cuentan. Devuelve null si no hay mapa.
+   */
+  footprintHits(x, y, yaw, margin = 0.05) {
+    if (!this.map) return null;
+    const m = this.map.info;
+    const res = m.resolution;
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+    const hl = ROBOT_LENGTH / 2 + margin, hw = ROBOT_WIDTH / 2 + margin;
+    const step = res / 2;
+    const seen = new Set();
+    let hits = 0;
+    for (let a = -hl; a <= hl; a += step) {
+      for (let b = -hw; b <= hw; b += step) {
+        const wx = x + c * a - s * b, wy = y + s * a + c * b;
+        const col = Math.floor((wx - m.origin.x) / res);
+        const row = Math.floor((wy - m.origin.y) / res);
+        if (col < 0 || row < 0 || col >= m.width || row >= m.height) continue;
+        const k = row * m.width + col;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        if (this.map.grid[k] >= OCCUPIED) hits++;
+      }
+    }
+    return hits;
+  }
   setPoints(points) { this.points = points || []; this.dirty = true; }
   setRoute(route) {
     const same = JSON.stringify(route) === JSON.stringify(this.route);
@@ -145,6 +189,8 @@ export class MapView {
     this._drawScan();
     this._drawPoints();
     this._drawRoute();
+    if (this.workPreview) this._drawWorkPreview(this.workPreview);
+    if (this.wallDraft) this._drawWallDraft(this.wallDraft);
     if (this.goal) this._drawGoal(this.goal, this._goalColor(this.goal.state));
     if (this.preview) {
       this._drawGoal(this.preview, this.tool === 'point' ? COLORS.pointPreview : COLORS.goalPreview);
@@ -173,18 +219,26 @@ export class MapView {
     const showLabels = this.view.scale > 18;
     ctx.font = '12px system-ui, sans-serif';
     for (const p of this.points) {
+      const work = p.kind === 'work';
+      const hl = p.id === this.highlight;
+      if (work && p.work) this._drawWall(p.work.wall, p.screws, hl ? 4 : 3, hl ? 1 : 0.75);
       const [sx, sy] = this.toScreen(p.x, p.y);
-      const r = p.id === this.highlight ? 9 : 6;
+      const r = hl ? 9 : 6;
+      const color = work ? COLORS.work : COLORS.point;
       ctx.save();
       ctx.translate(sx, sy);
-      ctx.fillStyle = COLORS.point;
+      ctx.fillStyle = color;
       ctx.strokeStyle = '#fff';
-      ctx.lineWidth = p.id === this.highlight ? 3 : 1.5;
-      ctx.beginPath();                                   // rombo
-      ctx.moveTo(0, -r); ctx.lineTo(r, 0); ctx.lineTo(0, r); ctx.lineTo(-r, 0); ctx.closePath();
+      ctx.lineWidth = hl ? 3 : 1.5;
+      ctx.beginPath();
+      if (work) {                                        // cuadrado: punto de trabajo
+        ctx.rect(-r * 0.85, -r * 0.85, r * 1.7, r * 1.7);
+      } else {                                           // rombo: punto de movimiento
+        ctx.moveTo(0, -r); ctx.lineTo(r, 0); ctx.lineTo(0, r); ctx.lineTo(-r, 0); ctx.closePath();
+      }
       ctx.fill(); ctx.stroke();
       ctx.rotate(-p.yaw);                                // orientación
-      ctx.strokeStyle = COLORS.point; ctx.lineWidth = 2;
+      ctx.strokeStyle = color; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(r, 0); ctx.lineTo(r + 9, 0); ctx.stroke();
       ctx.restore();
       if (showLabels || p.id === this.highlight) {
@@ -194,6 +248,85 @@ export class MapView {
         ctx.fillText(p.name, sx + 10, sy - 8);
       }
     }
+  }
+
+  /** Cara de pared marcada + tornillos (puntos de trabajo y vista previa). */
+  _drawWall(wall, screws, width = 3, alpha = 1, color = COLORS.workWall) {
+    const ctx = this.ctx;
+    const [a, b] = wall.map(([x, y]) => this.toScreen(x, y));
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
+    if (screws) {
+      const r = Math.max(2, Math.min(4, 0.03 * this.view.scale));
+      ctx.fillStyle = COLORS.screw; ctx.strokeStyle = COLORS.label; ctx.lineWidth = 1;
+      const seen = new Set();                  // varias filas caen en el mismo punto en planta
+      for (const s of screws) {
+        const key = `${s.x},${s.y}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const [sx, sy] = this.toScreen(s.x, s.y);
+        ctx.beginPath(); ctx.arc(sx, sy, r, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  /** Huella del robot (rectángulo) en una pose, solo contorno. */
+  _drawFootprint(x, y, yaw, color, dashed = true) {
+    const ctx = this.ctx;
+    const [sx, sy] = this.toScreen(x, y);
+    const k = this.view.scale;
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(-yaw);
+    ctx.strokeStyle = color; ctx.lineWidth = 2;
+    if (dashed) ctx.setLineDash([6, 4]);
+    ctx.strokeRect(-ROBOT_LENGTH / 2 * k, -ROBOT_WIDTH / 2 * k, ROBOT_LENGTH * k, ROBOT_WIDTH * k);
+    ctx.setLineDash([]);
+    const L = Math.max(14, ROBOT_LENGTH * 0.45 * k);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(L, 0);
+    ctx.lineTo(L - 7, -6); ctx.moveTo(L, 0); ctx.lineTo(L - 7, 6); ctx.stroke();
+    ctx.restore();
+  }
+
+  _drawWorkPreview(w) {
+    const color = w.bad ? COLORS.workBad : COLORS.work;
+    this._drawWall(w.wall, w.screws, 4, 1, w.error ? COLORS.workBad : COLORS.workWall);
+    if (!w.error && w.x !== undefined) this._drawFootprint(w.x, w.y, w.yaw, color);
+  }
+
+  /** Pared que se está marcando: línea + "1"/"2" + flecha hacia el lado del robot. */
+  _drawWallDraft(d) {
+    const ctx = this.ctx;
+    const [a, b] = [d.p1, d.p2].map(([x, y]) => this.toScreen(x, y));
+    ctx.save();
+    ctx.strokeStyle = COLORS.workWall; ctx.lineWidth = 3; ctx.setLineDash([8, 5]);
+    ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
+    ctx.setLineDash([]);
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len > 12) {
+      // El robot queda a la derecha de 1->2 en el mundo: (t.y, -t.x). En pantalla
+      // la y está invertida, así que en píxeles es (-uy, ux).
+      const ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len;
+      const nx = -uy, ny = ux;
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      const L = 26;
+      ctx.strokeStyle = COLORS.work; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(mx + nx * 4, my + ny * 4); ctx.lineTo(mx + nx * L, my + ny * L);
+      ctx.stroke();
+      ctx.fillStyle = COLORS.work; ctx.font = 'bold 11px system-ui, sans-serif';
+      ctx.fillText('robot', mx + nx * (L + 4) - 14, my + ny * (L + 4) + 4);
+    }
+    ctx.font = 'bold 12px system-ui, sans-serif';
+    for (const [[sx, sy], label] of [[a, '1'], [b, '2']]) {
+      ctx.fillStyle = COLORS.workWall;
+      ctx.beginPath(); ctx.arc(sx, sy, 8, 0, 2 * Math.PI); ctx.fill();
+      ctx.fillStyle = COLORS.label; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(label, sx, sy + 0.5);
+    }
+    ctx.restore();
   }
 
   _drawRoute() {
@@ -286,6 +419,10 @@ export class MapView {
         const [wx, wy] = this.toWorld(...pos(e));
         this.preview = { x: wx, y: wy, yaw: 0 };
         this.dirty = true;
+      } else if (this.tool === 'work' && this.pointers.size === 1) {
+        const p = this.toWorld(...pos(e));
+        this.wallDraft = { p1: p, p2: p };
+        this.dirty = true;
       }
     });
 
@@ -302,6 +439,12 @@ export class MapView {
         const d1 = Math.hypot(now[0] - other[0], now[1] - other[1]);
         if (d0 > 0) this._zoomAt((now[0] + other[0]) / 2, (now[1] + other[1]) / 2, d1 / d0);
         this.preview = null;
+        this.wallDraft = null;
+        return;
+      }
+      if (this.tool === 'work' && this.wallDraft) {           // arrastrar: segundo extremo
+        this.wallDraft.p2 = this.toWorld(...now);
+        this.dirty = true;
         return;
       }
       if ((this.tool === 'goal' || this.tool === 'point') && this.preview) {  // arrastrar: orientación
@@ -324,10 +467,18 @@ export class MapView {
         this.preview = null;
         this.dirty = true;
         (this.tool === 'goal' ? this.onGoal : this.onPoint)(g);
+      } else if (this.tool === 'work' && this.wallDraft && this.pointers.size === 0) {
+        const { p1, p2 } = this.wallDraft;
+        this.wallDraft = null;
+        this.dirty = true;
+        // Ignora toques sin arrastre (< 10 px en pantalla)
+        if (Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) * this.view.scale >= 10) {
+          this.onWork([[p1[0], p1[1]], [p2[0], p2[1]]]);
+        }
       }
     };
     c.addEventListener('pointerup', end);
-    c.addEventListener('pointercancel', (e) => { this.preview = null; end(e); });
+    c.addEventListener('pointercancel', (e) => { this.preview = null; this.wallDraft = null; end(e); });
 
     c.addEventListener('wheel', (e) => {
       e.preventDefault();

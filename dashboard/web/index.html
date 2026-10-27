@@ -51,7 +51,8 @@
         <div class="seg" role="group" aria-label="Herramienta del mapa">
           <button class="seg-btn active" data-tool="pan" title="Mover la vista">Mover</button>
           <button class="seg-btn" data-tool="goal" title="Pulsar y arrastrar para orientar">Poner goal</button>
-          <button class="seg-btn needs-operator" data-tool="point" title="Pulsar y arrastrar para orientar; pide un nombre">Añadir punto</button>
+          <button class="seg-btn needs-operator" data-tool="point" title="Punto de movimiento: pulsar y arrastrar para orientar; pide un nombre">Punto mov.</button>
+          <button class="seg-btn needs-operator" data-tool="work" title="Punto de trabajo: arrastrar sobre la cara de una pared, de izquierda a derecha vista desde donde quedará el robot">Punto trabajo</button>
         </div>
         <button class="ghost" id="btn-camera" title="Mostrar la cámara del brazo">Cámara</button>
         <button class="ghost" id="btn-center">Centrar robot</button>
@@ -61,6 +62,7 @@
       <div class="map-wrap">
         <canvas id="map"></canvas>
         <div class="map-hint" id="map-hint">Esperando mapa…</div>
+        <div class="map-tip hidden" id="map-tip">Arrastra sobre la <b>cara de la pared</b> de <b>izquierda a derecha</b>, vista desde donde quedará el robot</div>
         <div class="cam-box hidden" id="cam-box">
           <img id="cam-img" alt="Cámara del brazo">
           <div class="cam-msg hidden" id="cam-msg"></div>
@@ -168,11 +170,33 @@
       </div>
 
       <div class="pp-body" id="pp-points">
-        <div class="pp-actions needs-operator">
+        <div class="pp-actions needs-operator" id="pp-points-actions">
           <button class="ghost" id="btn-save-pose">+ Posición actual</button>
-          <small>o «Añadir punto» en el mapa</small>
+          <small>o «Punto mov.» / «Punto trabajo» en el mapa</small>
         </div>
         <ul class="pp-list" id="points-list"></ul>
+
+        <!-- Editor de punto de trabajo (6.3) -->
+        <div class="work-editor hidden" id="work-editor">
+          <div class="re-title" id="we-title">Nuevo punto de trabajo</div>
+          <input id="we-name" placeholder="Nombre del punto" maxlength="40">
+          <div class="we-wall" id="we-wall">Pared: —</div>
+          <div class="we-grid">
+            <label>Distancia a la pared (m)<input type="number" id="we-distance" min="0.5" max="2" step="0.05"></label>
+            <label>Altura fila inferior (m)<input type="number" id="we-bottom" min="0.3" max="1.8" step="0.05"></label>
+            <label>Columnas<input type="number" id="we-cols" min="1" max="10" step="1"></label>
+            <label>Filas<input type="number" id="we-rows" min="1" max="10" step="1"></label>
+            <label>Separación horizontal (m)<input type="number" id="we-sh" min="0.05" max="1" step="0.05"></label>
+            <label>Separación vertical (m)<input type="number" id="we-sv" min="0.05" max="1" step="0.05"></label>
+          </div>
+          <div class="we-msg" id="we-msg"></div>
+          <div class="re-buttons">
+            <button class="primary" id="we-save">Guardar</button>
+            <button class="ghost" id="we-flip" title="Coloca el robot al otro lado de la pared">⇄ Lado</button>
+            <button class="ghost" id="we-remark" title="Vuelve a marcar la pared en el mapa">Remarcar</button>
+            <button class="ghost" id="we-cancel">Cancelar</button>
+          </div>
+        </div>
       </div>
 
       <div class="pp-body hidden" id="pp-routes">
