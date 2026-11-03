@@ -30,6 +30,7 @@ API HTTP
   Posturas del brazo (7 ángulos en rad, orden A1..A7)
   GET    /api/arm/poses
   POST   /api/arm/poses         (operador) {name, positions?}  sin positions = postura actual
+         (la postura de reposo, cfg.ARM_SAFE_POSE_NAME, solo la crea/modifica/borra un administrador)
   PATCH  /api/arm/poses/{id}    (operador) {name?, positions?}
   DELETE /api/arm/poses/{id}    (operador)
   Los cambios emiten 'arm_poses_changed'.
@@ -44,8 +45,9 @@ WebSocket /ws (requiere sesión; se cierra con código 4401 si no la hay)
     {"type": "config", "limits": {...}, "user": {username, role}}      al conectar
     {"type": "state", "ros_ok", "pose", "nav", "route_running", "teleop_active",
      "nav2_ready", "control": {holder: {username, role, connected}|null, you, can_take}}
-       nav = {mode: 'goal'|'route'|'approach'|None, state, goal: {x,y,yaw}|None, distance_remaining?,
-              target?, phase?: navigating|adjusting,
+       nav = {mode: 'goal'|'route'|'approach'|'shift'|None, state, goal: {x,y,yaw}|None, distance_remaining?,
+              target?, phase?: navigating|adjusting|shifting,
+              shift?: {phase, shift, traveled, speed, column, distance_error?, lateral_error?, angle_error?, message?},
               approach?: {phase, distance_error, lateral_error, angle_error, points, message?},
               route?: {id, name, total, current, phase: navigating|waiting|done,
                        wait_remaining?, reached, skipped: [...], stops: [{name,x,y,yaw,wait_s}]}}
@@ -62,6 +64,9 @@ WebSocket /ws (requiere sesión; se cierra con código 4401 si no la hay)
         (punto de trabajo: navega y al llegar hace el ajuste fino frente a la pared)
     {"type": "approach", "point_id"}                                   requiere control
         (solo el ajuste fino; el robot ya debe estar delante de la pared)
+    {"type": "shift", "point_id", "col"}                               requiere control
+        (desplazamiento lateral paralelo a la pared hasta dejar el brazo frente a
+         la columna; si la comprobación final falla, reajuste automático)
     {"type": "cancel"}                                                 requiere control
     {"type": "run_route", "route_id"}                                  requiere control
     {"type": "arm_jog", "v": [7 x rad/s]}                              requiere control, a 10 Hz
@@ -321,6 +326,7 @@ async def lifespan(app):
                     'python -m gateway.users add <usuario> --role admin')
     control = ControlManager(cfg.CONTROL_GRACE, on_control_change)
     bridge, executor, _ = start_ros(cfg)
+    bridge.safe_pose_provider = safe_pose
     ticker = asyncio.create_task(control_ticker())
     try:
         yield
@@ -731,6 +737,22 @@ class ArmPosePatch(BaseModel):
         return v
 
 
+def is_safe_name(name):
+    return (name or '').strip().lower() == cfg.ARM_SAFE_POSE_NAME.lower()
+
+
+def safe_pose():
+    """La postura de reposo (por nombre, ver cfg.ARM_SAFE_POSE_NAME) o None."""
+    return next((p for p in db.list_arm_poses() if is_safe_name(p['name'])), None)
+
+
+def check_safe_pose_rights(user, *names):
+    """Solo un administrador crea, modifica o borra la postura de reposo."""
+    if any(is_safe_name(n) for n in names) and user['role'] != 'admin':
+        raise HTTPException(403, f'solo un administrador puede crear o cambiar la postura '
+                                 f'«{cfg.ARM_SAFE_POSE_NAME}»')
+
+
 def check_arm_positions(positions):
     """Ángulos finitos y dentro de los límites blandos (si ya se conocen)."""
     if not all(math.isfinite(p) for p in positions):
@@ -751,6 +773,7 @@ async def arm_poses_list(user=Depends(current_user)):
 
 @app.post('/api/arm/poses', status_code=201)
 async def arm_poses_create(body: ArmPoseIn, user=Depends(operator_user)):
+    check_safe_pose_rights(user, body.name)
     positions = body.positions
     if positions is None:
         positions = bridge.arm.joint_positions()
@@ -774,6 +797,7 @@ async def arm_poses_update(pose_id: int, body: ArmPosePatch, user=Depends(operat
         raise HTTPException(404, 'postura no encontrada')
     if body.name is None and body.positions is None:
         raise HTTPException(400, 'no hay cambios')
+    check_safe_pose_rights(user, target['name'], body.name)
     if body.positions is not None:
         check_arm_positions(body.positions)
     try:
@@ -791,6 +815,7 @@ async def arm_poses_delete(pose_id: int, user=Depends(operator_user)):
     target = db.get_arm_pose(pose_id)
     if target is None:
         raise HTTPException(404, 'postura no encontrada')
+    check_safe_pose_rights(user, target['name'])
     db.delete_arm_pose(pose_id)
     log.info('POSTURA borrada por %s: %s', user['username'], target['name'])
     bridge.emit('info', 'arm_poses_changed', f'{user["username"]} ha borrado la postura {target["name"]}')
@@ -909,7 +934,7 @@ def _num(msg, key, default=None):
         raise CommandRejected(f"'{key}' debe ser un número")
 
 
-NEEDS_CONTROL = ('teleop', 'goal', 'go_point', 'approach', 'cancel', 'run_route',
+NEEDS_CONTROL = ('teleop', 'goal', 'go_point', 'approach', 'shift', 'cancel', 'run_route',
                  'arm_jog', 'arm_move', 'arm_screw', 'arm_cancel', 'arm_mode')
 
 
@@ -952,6 +977,8 @@ def handle_command(msg, client: Client):
             work = point['work'] if point['kind'] == 'work' else None
             bridge.send_goal(point['x'], point['y'], point['yaw'], who=who,
                              work=work, name=point['name'], point_id=point['id'])
+    elif kind == 'shift':
+        bridge.shift_to_column(int(_num(msg, 'point_id')), int(_num(msg, 'col')), who=who)
     elif kind == 'cancel':
         bridge.cancel_goal(who=who)
     elif kind == 'run_route':

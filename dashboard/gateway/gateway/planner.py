@@ -127,22 +127,39 @@ TOOL_TO_WALL_QUAT = quat_from_axes((0.0, 0.0, 1.0), cross((1.0, 0.0, 0.0), (0.0,
                                    (1.0, 0.0, 0.0))
 
 
-def screw_tcp_pose_base(distance, screw, standoff, base_half, arm_offset_y, base_height=0.0):
+def wall_to_base(pos, angle):
+    """Del frame «pared» al de la base. El frame pared tiene el origen en el
+    centro de la base, X perpendicular a la pared REAL (hacia ella) e Y a lo
+    largo; está girado `angle` rad alrededor de Z respecto a la base (el error
+    angular que deja el ajuste: + = la pared queda girada a la izquierda)."""
+    c, s = math.cos(angle), math.sin(angle)
+    x, y, z = pos
+    return (c * x - s * y, s * x + c * y, z)
+
+
+def screw_tcp_pose_base(distance, screw, standoff, base_half, arm_offset_y, base_height=0.0,
+                        lateral=0.0, angle=0.0):
     """Pose del TCP delante de un tornillo, en el frame de la BASE (kmp_base_link).
 
-    Tras un ajuste correcto la base está perpendicular a la pared REAL (lidar), con
-    el frontal a `distance` y el brazo frente al centro del tramo marcado. Así que:
-      - la cara de la pared está en x = base_half + distance
-      - el tornillo `u` (+ hacia el 2º punto = derecha vista desde el robot)
-        está en y = arm_offset_y - u
-      - su altura sobre el suelo es z; base_height es la altura del origen de la
-        base sobre el suelo (0 si kmp_base_link está a ras de suelo)
-    La herramienta apunta a +X de la base: perpendicular a la pared real, sin
-    depender de lo bien marcada que esté la línea en el mapa."""
-    pos = (base_half + distance - standoff,
-           arm_offset_y - screw['u'],
-           screw['z'] - base_height)
-    return pos, TOOL_TO_WALL_QUAT
+    Parte de la posición REAL de la base frente a la pared (la medida por el
+    ajuste o el desplazamiento lateral, no la pedida):
+      - distance: del frontal a la cara de la pared -> la cara está en
+        x = base_half + distance (frame pared)
+      - lateral: dónde está el brazo a lo largo del tramo, con el mismo
+        convenio que `u` (+ hacia el 2º punto = derecha vista desde el robot).
+        El tornillo `u` queda (u - lateral) a la derecha del brazo:
+        y = arm_offset_y - (u - lateral)
+      - angle: error angular que queda; el objetivo se gira lo mismo para que
+        la herramienta siga perpendicular a la pared real
+      - base_height: altura del origen de la base sobre el suelo (las alturas
+        de los tornillos son sobre el suelo)
+    La herramienta apunta al +X del frame pared: perpendicular a la pared
+    real, sin depender de lo bien marcada que esté la línea en el mapa."""
+    pos_wall = (base_half + distance - standoff,
+                arm_offset_y - (screw['u'] - lateral),
+                screw['z'] - base_height)
+    rot = (0.0, 0.0, math.sin(angle / 2), math.cos(angle / 2))
+    return wall_to_base(pos_wall, angle), quat_mul(rot, TOOL_TO_WALL_QUAT)
 
 
 def tcp_errors(actual_pos, actual_quat, target_pos, target_quat):
@@ -193,6 +210,15 @@ class MoveItPlanner:
     def to_arm_base(self, frame, pos, quat=None):
         """Pose en `frame` -> pose en ARM_BASE_FRAME."""
         return self.transform(self.frame_to_arm_base(frame), pos, quat)
+
+    def tcp_in_base(self):
+        """(pos, quat) del TCP en el frame de la base, o None si TF no lo tiene."""
+        try:
+            tf = self.node.tf_buffer.lookup_transform(self.cfg.BASE_FRAME, self.cfg.ARM_TCP_FRAME, Time())
+        except TransformException:
+            return None
+        t, r = tf.transform.translation, tf.transform.rotation
+        return (t.x, t.y, t.z), (r.x, r.y, r.z, r.w)
 
     def base_height(self):
         """Altura del origen de la base (BASE_FRAME) sobre el suelo (z del mapa).
@@ -293,24 +319,27 @@ class MoveItPlanner:
         return self.client.send_goal_async(goal, feedback_callback=feedback_cb)
 
     # ------------------------------------------------------------ escena
-    def set_wall(self, name, work):
+    def set_wall(self, name, work, est):
         """Añade (o sustituye) la pared del punto de trabajo como una caja. Se
-        calcula en el frame de la base, igual que los tornillos: la cara queda a
-        `distance` del frontal (lo que ha medido el lidar en el ajuste), centrada
-        frente al brazo, con WORK_WALL_THICKNESS de grosor y WORK_WALL_HEIGHT de
-        alto. Tras mover la base hay que volver a llamarla (la caja no se mueve
-        sola con el mapa)."""
+        calcula en el frame de la base con la misma posición real que los
+        tornillos (`est` = {distance, lateral, angle}, ver screw_tcp_pose_base):
+        la cara a `distance` del frontal, el centro del tramo `lateral` a la
+        izquierda del brazo, girada `angle`; WORK_WALL_THICKNESS de grosor y
+        WORK_WALL_HEIGHT de alto. Tras mover la base hay que volver a llamarla:
+        la caja se guarda respecto a la base y no se mueve sola con el mapa."""
         if not self.scene_cli.service_is_ready():
             log.warning('MoveIt: sin servicio de escena; la pared de %s no se añade', name)
             return False
         cfg = self.cfg
         _, _, _, length = wall_frame(work['wall'])
         thick, height = cfg.WORK_WALL_THICKNESS, cfg.WORK_WALL_HEIGHT
+        a = est['angle']
         try:
-            center_base = (cfg.BASE_HALF_LENGTH + work['distance'] + thick / 2,
-                           cfg.ARM_OFFSET_Y,
+            center_wall = (cfg.BASE_HALF_LENGTH + est['distance'] + thick / 2,
+                           cfg.ARM_OFFSET_Y + est['lateral'],
                            height / 2 - self.base_height())
-            pos, quat = self.to_arm_base(cfg.BASE_FRAME, center_base, (0.0, 0.0, 0.0, 1.0))
+            pos, quat = self.to_arm_base(cfg.BASE_FRAME, wall_to_base(center_wall, a),
+                                         (0.0, 0.0, math.sin(a / 2), math.cos(a / 2)))
         except CommandRejected as e:
             log.warning('MoveIt: pared de %s no añadida: %s', name, e)
             return False

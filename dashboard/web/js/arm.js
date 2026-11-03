@@ -42,6 +42,8 @@ export class ArmPanel {
     this.timer = null;
     this.planSpeed = 0.25;          // velocidad de MoveIt (fracción)
     this.workHere = null;           // state.work_here: punto de trabajo frente al que está el robot
+    this.safeName = 'reposo';       // nombre de la postura de reposo (state.safe_pose.name)
+    this._safeKey = null;
 
     this._buildRows();
     this._bind();
@@ -201,7 +203,8 @@ export class ArmPanel {
   }
 
   // ------------------------------------------------------------ tornillos (5.3)
-  /** state.work_here: {point_id, name, screws: [{row, col, z, u}]} o null. */
+  /** state.work_here: {point_id, name, screws: [{row, col, z, u}], columns: [{col, u}],
+   *  column: columna frente a la que está el brazo (o null), est: {distance, lateral, angle}} o null. */
   setWorkHere(w) {
     const key = w ? JSON.stringify(w) : null;
     if (key === this._workKey) return;
@@ -209,23 +212,69 @@ export class ArmPanel {
     this.workHere = w;
     this.$('arm-screws').classList.toggle('hidden', !w);
     const grid = this.$('screw-grid');
+    const colsEl = this.$('screw-cols');
     grid.replaceChildren();
+    colsEl.replaceChildren();
     if (!w) return;
     this.$('arm-screws-title').textContent = `Tornillos · ${w.name}`;
     const rows = Math.max(...w.screws.map((s) => s.row)) + 1;
     const cols = Math.max(...w.screws.map((s) => s.col)) + 1;
     grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    colsEl.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
     // Fila de arriba primero (como se ve la pared); columna 0 a la izquierda
     for (let r = rows - 1; r >= 0; r--) {
       for (let c = 0; c < cols; c++) {
         const s = w.screws.find((x) => x.row === r && x.col === c);
         const b = document.createElement('button');
-        b.className = 'ghost needs-control';
+        const toolHere = w.tcp_screw && w.tcp_screw.row === r && w.tcp_screw.col === c;
+        b.className = 'ghost needs-control' + (c === w.column ? ' col-here' : '') + (toolHere ? ' tool-here' : '');
         b.innerHTML = `F${r + 1}·C${c + 1}<small>${s.z.toFixed(2)} m</small>`;
         b.title = `TCP delante del tornillo (altura ${s.z.toFixed(2)} m, ${s.u >= 0 ? '+' : ''}${(s.u * 100).toFixed(0)} cm del centro)`;
         b.addEventListener('click', () => this.goToScrew(r, c));
         grid.append(b);
       }
+    }
+    // Botones de desplazamiento de la base: uno por columna. La referencia es
+    // el TCP si está delante de un tornillo (se mide por TF, también tras mover
+    // el brazo a mano) o la base del brazo si no.
+    const lat = w.reference_u ?? (w.est ? w.est.lateral : 0);
+    for (const { col, u } of w.columns || []) {
+      const b = document.createElement('button');
+      const here = col === w.column;
+      b.className = 'ghost needs-control' + (here ? ' here' : '');
+      // u + = derecha vista desde el robot: la flecha indica hacia dónde se moverá la base
+      const arrow = here ? '●' : (u > lat ? '▶' : '◀');
+      b.innerHTML = `${arrow} C${col + 1}<small>${here ? 'aquí' : `${((u - lat) * 100).toFixed(0)} cm`}</small>`;
+      b.title = here ? (w.reference === 'tcp' ? 'La herramienta ya está frente a esta columna' : 'El brazo ya está frente a esta columna')
+        : `Desplazar la base ${(Math.abs(u - lat) * 100).toFixed(0)} cm a la ${u > lat ? 'derecha' : 'izquierda'}`;
+      b.disabled = here;
+      b.addEventListener('click', () => this.shiftTo(col));
+      colsEl.append(b);
+    }
+    const e = w.est;
+    const ref = w.reference === 'tcp' && w.tcp_screw
+      ? `Referencia: herramienta en F${w.tcp_screw.row + 1}·C${w.tcp_screw.col + 1} (al desplazar, queda en el mismo tornillo de la columna destino)`
+      : 'Referencia: base del brazo (la herramienta no está delante de ningún tornillo)';
+    this.$('arm-screws-ref').textContent = ref;
+    this.$('arm-screws-est').textContent = e
+      ? `Base medida: d ${(e.distance * 100).toFixed(1)} cm · lateral ${e.lateral >= 0 ? '+' : ''}${(e.lateral * 1000).toFixed(0)} mm · θ ${(e.angle * 180 / Math.PI).toFixed(2)}°`
+      : '';
+  }
+
+  /** state.safe_pose: {name, defined, id, in_pose}. */
+  setSafePose(sp) {
+    const el = this.$('arm-safe');
+    if (!sp) { el.textContent = ''; return; }
+    if (sp.name.toLowerCase() !== this.safeName) { this.safeName = sp.name.toLowerCase(); this._renderPoses(); }
+    if (!sp.defined) {
+      el.textContent = `Sin postura «${sp.name}»: la base no se moverá (salvo teleop y desplazamiento lateral) hasta que un administrador la guarde`;
+      el.className = 'arm-moveit bad';
+    } else if (sp.in_pose) {
+      el.textContent = `Brazo en «${sp.name}»: la base puede moverse`;
+      el.className = 'arm-moveit ok';
+    } else {
+      el.textContent = `Brazo fuera de «${sp.name}»: irá allí (50 %) antes de navegar o ajustar`;
+      el.className = 'arm-moveit warn';
     }
   }
 
@@ -233,6 +282,13 @@ export class ArmPanel {
     if (!this.workHere) return;
     const msg = { type: 'arm_screw', point_id: this.workHere.point_id, row, col, speed: this.planSpeed };
     if (!this.send(msg)) this.notify('warning', 'Sin conexión: la orden no se ha enviado');
+  }
+
+  shiftTo(col) {
+    if (!this.workHere) return;
+    if (!this.send({ type: 'shift', point_id: this.workHere.point_id, col })) {
+      this.notify('warning', 'Sin conexión: la orden no se ha enviado');
+    }
   }
 
   _renderPoses() {
@@ -251,7 +307,12 @@ export class ArmPanel {
       const info = document.createElement('div');
       info.className = 'pp-info';
       const b = document.createElement('b');
-      b.textContent = p.name;
+      const isSafe = p.name.trim().toLowerCase() === this.safeName;
+      b.textContent = isSafe ? `⌂ ${p.name}` : p.name;
+      if (isSafe) {
+        li.classList.add('safe-pose');
+        b.title = 'Postura de reposo: el brazo va aquí antes de cualquier movimiento no lateral de la base. Solo un administrador la modifica';
+      }
       const s = document.createElement('small');
       s.textContent = p.positions.map((x) => deg(x).toFixed(0)).join(' · ');
       info.append(b, s);
@@ -259,8 +320,8 @@ export class ArmPanel {
       actions.className = 'pp-actions-row';
       actions.append(
         btn('Ir', 'needs-control', () => this.goToPose(p), 'Mover el brazo a esta postura'),
-        btn('↺', 'needs-operator', () => this.overwritePose(p), 'Sustituir por la posición actual'),
-        btn('✕', 'needs-operator danger-text', () => this.deletePose(p), 'Borrar'),
+        btn('↺', isSafe ? 'needs-admin' : 'needs-operator', () => this.overwritePose(p), 'Sustituir por la posición actual'),
+        btn('✕', `${isSafe ? 'needs-admin' : 'needs-operator'} danger-text`, () => this.deletePose(p), 'Borrar'),
       );
       li.append(info, actions);
       ul.append(li);

@@ -155,15 +155,17 @@ function onState(s) {
   const nav = s.nav || {};
   const route = nav.mode === 'route' ? nav.route : null;
   setDot('st-route', s.route_running ? 'busy' : '');
-  $('st-route-txt').textContent = s.route_running ? routeStatusText(nav, route) : '';
+  $('st-route-txt').textContent = s.route_running
+    ? (nav.arm_safe ? 'brazo a reposo · ' : '') + routeStatusText(nav, route) : '';
 
   camera.setStatus(s.camera);
   arm.setState(s.arm);
   arm.setWorkHere(s.work_here || null);
+  arm.setSafePose(s.safe_pose || null);
   map.setGoal(nav.goal ? { ...nav.goal, state: nav.state } : null);
   map.setRoute(route);
   points.setNav(nav);
-  $('goal-info').textContent = goalInfoText(nav, route);
+  $('goal-info').textContent = (nav.arm_safe ? 'Brazo a reposo → ' : '') + goalInfoText(nav, route);
 
   renderControl(s.control);
 }
@@ -184,8 +186,19 @@ function approachText(a) {
   return `ajuste · ${phase} · d ${mm(a.distance_error)} · lat ${mm(a.lateral_error)} · θ ${deg1(a.angle_error)}`;
 }
 
+/** "braking · 0.21 / 0.30 m" a partir de nav.shift. */
+function shiftText(sh) {
+  if (!sh) return 'desplazando';
+  const phase = { iniciando: 'iniciando', accelerating: 'acelerando', cruising: 'crucero', braking: 'frenando',
+    checking: 'comprobando', hecho: 'hecho', fallido: 'FALLIDO' }[sh.phase] || sh.phase;
+  let t = `desplazamiento a C${sh.column + 1} · ${phase} · ${Math.abs(sh.traveled).toFixed(3)} / ${Math.abs(sh.shift).toFixed(3)} m`;
+  if (sh.distance_error != null) t += ` · d ${mm(sh.distance_error)} · lat ${mm(sh.lateral_error)} · θ ${deg1(sh.angle_error)}`;
+  return t;
+}
+
 function routeStatusText(nav, route) {
   if (!route) {
+    if (nav.mode === 'shift') return shiftText(nav.shift);
     if (nav.mode === 'approach' || nav.phase === 'adjusting') return approachText(nav.approach);
     return distText(nav) || 'iniciando';
   }
@@ -205,8 +218,12 @@ function goalInfoText(nav, route) {
       (route.phase === 'waiting' ? ` (esperando ${route.wait_remaining}s)` : '') +
       (route.phase === 'adjusting' ? ` · ${approachText(nav.approach)}` : '') + skipped;
   }
+  if (nav.mode === 'shift') {
+    const msg = nav.shift?.message && nav.state !== 'succeeded' ? ` — ${nav.shift.message}` : '';
+    return `${nav.target} · ${shiftText(nav.shift)} · ${NAV_TEXT[nav.state] || nav.state}${msg}`;
+  }
   if (nav.mode === 'approach' || nav.approach) {
-    const head = nav.mode === 'approach' ? 'Ajuste' : 'Ir';
+    const head = nav.mode === 'approach' ? (nav.fallback ? 'Reajuste' : 'Ajuste') : 'Ir';
     const target = nav.target ? ` frente a ${nav.target}` : '';
     if (['sending', 'active'].includes(nav.state)) {
       return nav.phase === 'navigating'

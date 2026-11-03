@@ -269,6 +269,7 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .re-buttons .primary { flex: 1; }
 
 /* Permisos: el observador no ve acciones de edición; sin control no se mueve nada */
+body:not(.role-admin) .needs-admin,
 body.role-observer .needs-operator,
 body.role-observer .needs-control { display: none !important; }
 body.no-control .needs-control { opacity: .35; pointer-events: none; }
@@ -323,9 +324,17 @@ body.no-control .needs-control { opacity: .35; pointer-events: none; }
 .arm-moveit.ok::before { content: "● "; color: var(--ok); }
 .arm-moveit.bad { color: #ffb3b5; }
 .arm-moveit.bad::before { content: "● "; color: var(--danger); }
+.arm-moveit.warn { color: #ffd88a; }
+.arm-moveit.warn::before { content: "● "; color: #f0b429; }
 .arm-screws { padding: 0 14px 10px; display: flex; flex-direction: column; gap: 6px; }
 .arm-screws-hint { color: var(--muted); font-size: 11px; }
 .screw-grid { display: grid; gap: 6px; }
 .screw-grid button { font-family: var(--mono); font-size: 12px; padding: 6px 4px; }
 .screw-grid button small { display: block; color: var(--muted); font-size: 10px; }
 .screw-grid button.target { background: var(--accent); color: #fff; border-color: var(--accent); }
+.screw-cols button { padding: 4px; }
+.screw-cols button.here { border-color: var(--ok); color: #9be6bd; }
+.screw-grid button.col-here { border-color: var(--ok); }
+.screw-grid button.tool-here { background: rgba(47, 191, 113, .18); }
+.pp-item.safe-pose b { color: #9be6bd; }
+.arm-screws-est { color: var(--muted); font-family: var(--mono); font-size: 11px; }

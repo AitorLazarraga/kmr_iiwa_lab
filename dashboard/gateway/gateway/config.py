@@ -38,6 +38,8 @@ MAP_TOPIC = _env('MAP_TOPIC', '/map')
 NAV_ACTION = _env('NAV_ACTION', '/navigate_to_pose')
 # Acercamiento fino a la pared (paso 6.4): acción del nodo kuka_nav/wall_approach.py
 APPROACH_ACTION = _env('APPROACH_ACTION', '/kmr_iiwa/approach_wall')
+# Desplazamiento lateral entre columnas (acción ShiftAlongWall del mismo nodo, 6.5)
+SHIFT_ACTION = _env('SHIFT_ACTION', '/kmr_iiwa/shift_along_wall')
 
 CAMERA_TOPIC = _env('CAMERA_TOPIC', '/kmr_iiwa/arm_camera/image')
 
@@ -114,6 +116,25 @@ WORK_WALL_HEIGHT = 2.5          # m desde el suelo
 MOVEIT_POSITION_TOL = 0.001     # m (radio de la esfera de la restricción de posición)
 MOVEIT_AXIS_TOL = 0.01          # rad (≈0,6°) en cada eje de la orientación de la herramienta
 
+# --- Postura de reposo -------------------------------------------------------
+# Antes de cualquier movimiento NO lateral de la base (Nav2: «Ir», goal, rutas;
+# «Ajustar»; reajuste tras un desplazamiento fallido) el brazo tiene que estar
+# en la postura guardada con este nombre. Si no lo está, el gateway lo lleva con
+# MoveIt y después mueve la base; si no puede, la base no se mueve.
+# Solo un administrador puede crear, modificar o borrar esa postura.
+# El desplazamiento lateral (ShiftAlongWall) y la teleop no la exigen.
+ARM_SAFE_POSE_NAME = 'reposo'   # se compara sin mayúsculas ni espacios a los lados
+ARM_SAFE_TOL_DEG = 2.0          # ° por articulación para considerar que ya está en reposo
+ARM_SAFE_SPEED = 0.50           # fracción de velocidad del movimiento automático a reposo
+
+# --- Herramienta frente a un tornillo ---------------------------------------
+# Para el desplazamiento lateral: si el TCP está delante de un tornillo (a
+# SCREW_STANDOFF de la pared, dentro de estas tolerancias), la columna de
+# referencia es la del TCP (el desplazamiento lo lleva al mismo tornillo de la
+# columna destino); si no, la del brazo (su base, link_0).
+TCP_AT_SCREW_TOL = 0.03         # m en lateral, altura y distancia a la pared
+TCP_AT_SCREW_ANGLE = 5.0        # ° de inclinación del eje de la herramienta
+
 # --- Check del TCP (check_tcp_orientation) ---------------------------------
 # Tras llegar delante de un tornillo se compara por TF el TCP real con el
 # pedido. Fuera de tolerancia -> aviso en el dashboard (y, con Servo en el 5.4,
@@ -127,7 +148,9 @@ TCP_CORRECTION_MAX_ANGLE = 3.0  # °
 TCP_CORRECTION_ATTEMPTS = 3
 
 # --- Desplazamiento lateral entre tornillos (ShiftAlongWall, secuenciador) ---
-# Valores acordados; los usará el secuenciador cuando exista.
+# El gateway solo usa SHIFT_MAX_DISTANCE (para rechazar antes de enviar); el
+# resto los aplica el nodo wall_approach (wall_approach.yaml) y se dejan aquí
+# como referencia de lo acordado.
 SHIFT_MAX_SPEED = 0.3           # m/s
 SHIFT_ACCEL = 0.5               # m/s²
 SHIFT_MAX_DISTANCE = 1.0        # m: hasta aquí, con el brazo a SCREW_STANDOFF y sin postura segura
