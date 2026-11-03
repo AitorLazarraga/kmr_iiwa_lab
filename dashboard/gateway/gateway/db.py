@@ -302,7 +302,7 @@ class Database:
         SELECT r.id   AS route_id,  r.name AS route_name, r.map_name,
                r.created_by, r.created_at, r.updated_at,
                rp.position, rp.wait_s,
-               p.id   AS point_id,  p.name AS point_name,  p.x, p.y, p.yaw, p.kind
+               p.id   AS point_id,  p.name AS point_name,  p.x, p.y, p.yaw, p.kind, p.work
         FROM routes r
         LEFT JOIN route_points rp ON rp.route_id = r.id
         LEFT JOIN points p        ON p.id = rp.point_id
@@ -333,6 +333,7 @@ class Database:
                     'y': row['y'],
                     'yaw': row['yaw'],
                     'kind': row['kind'],
+                    'work': json.loads(row['work']) if row['work'] else None,
                     'wait_s': row['wait_s'],
                 })
         result = list(routes.values())

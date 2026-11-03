@@ -1,12 +1,17 @@
-"""Brazo LBR iiwa 14: estado, límites, pose del TCP, jog articular y movimiento
-a posturas.
+"""Brazo LBR iiwa 14: estado, límites, pose del TCP, jog articular y movimientos
+planificados con MoveIt.
 
 ArmController no es un nodo propio: usa el nodo del gateway (RosBridge) para
 crear sus suscripciones, publicadores, servicios y temporizadores.
 
 Modos (según el controlador activo):
   'jog'        -> forward_position_controller: jog articular integrado a 50 Hz
-  'trajectory' -> joint_trajectory_controller: ir a una postura (FollowJointTrajectory)
+  'trajectory' -> joint_trajectory_controller: lo usa MoveIt para ejecutar
+
+Movimientos planificados (5.3): ir a una postura e ir delante de un tornillo se
+piden a MoveIt (planner.py), que comprueba colisiones con la plataforma, el
+propio brazo y la pared del punto de trabajo. Si MoveIt no está en marcha se
+rechazan; el jog articular sigue siendo directo.
 """
 import itertools
 import logging
@@ -16,10 +21,7 @@ import time
 import xml.etree.ElementTree as ET
 
 from action_msgs.msg import GoalStatus
-from control_msgs.action import FollowJointTrajectory
-from rclpy.action import ActionClient
 from sensor_msgs.msg import JointState
-from trajectory_msgs.msg import JointTrajectoryPoint
 from builtin_interfaces.msg import Duration
 from controller_manager_msgs.srv import ListControllers, SwitchController
 from rclpy.clock import Clock, ClockType
@@ -29,11 +31,13 @@ from std_msgs.msg import Float64MultiArray, String
 from tf2_ros import TransformException
 
 from .errors import CommandRejected
+from .planner import MoveItPlanner, error_text, tcp_errors
 
 log = logging.getLogger('gateway.arm')
 
 MODE_TEXT = {'jog': 'jog articular', 'trajectory': 'trayectoria'}
-MOVE_RUNNING = ('pending', 'sending', 'active')
+MOVE_RUNNING = ('pending', 'sending', 'planning', 'active')
+MOVEIT_SUCCESS = 1          # moveit_msgs/MoveItErrorCodes.SUCCESS
 
 
 def duration_msg(seconds):
@@ -95,13 +99,14 @@ class ArmController():
         steady = Clock(clock_type=ClockType.STEADY_TIME)
         node.create_timer(1.0 / cfg.ARM_JOG_RATE, self._jog_tick, clock=steady)
 
-        # Ir a postura (trayectoria)
-        self._traj_client = ActionClient(node, FollowJointTrajectory, cfg.ARM_TRAJ_ACTION)
-        self._move = None              # estado del movimiento a postura (dict) o None
+        # Movimientos planificados con MoveIt
+        self.planner = MoveItPlanner(node, cfg)
+        self._move = None              # estado del movimiento planificado (dict) o None
         self._move_handle = None
         self._move_job = itertools.count(1)
         self._move_current = 0         # trabajo vigente; los callbacks viejos se ignoran
         self._pending_move = None      # movimiento a lanzar cuando termine el cambio de modo
+        self._tcp_target = None        # (pos, quat) en ARM_BASE_FRAME si hay que comprobar el TCP al llegar
 
         node.create_timer(2.0, self._refresh_mode)
 
@@ -266,7 +271,7 @@ class ArmController():
         if move is not None:
             started = move.pop('started', None)
             if started is not None and move['state'] == 'active':
-                move['progress'] = round(min(1.0, (time.monotonic() - started) / move['duration']), 2)
+                move['elapsed'] = round(time.monotonic() - started, 1)
         ok = age is not None and age < self.cfg.ARM_STATE_TIMEOUT
         return {
             'ok': ok,
@@ -278,6 +283,9 @@ class ArmController():
             'limits': self._limits_for_web(),
             'jog_active': jog_active,
             'move': move,
+            'moveit_ready': self.planner.ready(),
+            'speeds': list(self.cfg.MOVEIT_SPEEDS),
+            'default_speed': self.cfg.MOVEIT_DEFAULT_SPEED,
         }
 
     def _seed_jog(self):
@@ -350,7 +358,11 @@ class ArmController():
         self.node.emit('info', 'arm_mode', f'Brazo en modo {MODE_TEXT[mode]}')
         if pending is not None:
             if mode == 'trajectory':
-                self._send_trajectory(*pending)
+                job, launch = pending
+                with self._lock:
+                    current = job == self._move_current
+                if current:
+                    launch(job)
             else:
                 with self._lock:
                     self._move = {**self._move, 'state': 'canceled'}
@@ -480,11 +492,29 @@ class ArmController():
         with self._lock:
             return self._jog_active or (self._move is not None and self._move['state'] in MOVE_RUNNING)
 
-    # ------------------------------------------------------------ ir a postura
-    def move_to(self, positions, who='?', label=None):
-        """Lleva el brazo a 7 ángulos (rad, orden A1..A7) con una trayectoria
-        interpolada. Si el modo no es 'trajectory', primero cambia de
-        controlador y lanza el movimiento al confirmarse el cambio."""
+    # ------------------------------------------------------------ movimientos planificados
+    def _check_speed(self, speed):
+        if speed is None:
+            return self.cfg.MOVEIT_DEFAULT_SPEED
+        try:
+            speed = float(speed)
+        except (TypeError, ValueError):
+            raise CommandRejected('velocidad no válida')
+        if not any(abs(speed - s) < 1e-6 for s in self.cfg.MOVEIT_SPEEDS):
+            raise CommandRejected(f'velocidad {speed:.2f} no permitida '
+                                  f'({", ".join(f"{s:.0%}" for s in self.cfg.MOVEIT_SPEEDS)})')
+        return speed
+
+    def _check_can_move(self):
+        if self.node.nav_running():
+            raise CommandRejected('no se puede mover el brazo mientras la base navega')
+        if self.joint_positions() is None:
+            raise CommandRejected('sin joint_states recientes')
+        self.planner.check_ready()
+
+    def move_to(self, positions, who='?', label=None, speed=None):
+        """Lleva el brazo a 7 ángulos (rad, orden A1..A7) con un plan de MoveIt
+        (sin colisiones). Rechaza si MoveIt no está en marcha."""
         if not isinstance(positions, (list, tuple)) or len(positions) != len(self.cfg.ARM_JOINTS):
             raise CommandRejected(f'la postura necesita {len(self.cfg.ARM_JOINTS)} ángulos')
         try:
@@ -493,30 +523,32 @@ class ArmController():
             raise CommandRejected('los ángulos deben ser números')
         if not all(math.isfinite(p) for p in target):
             raise CommandRejected('ángulo no válido (NaN o infinito)')
-        if self.node.nav_running():
-            raise CommandRejected('no se puede mover el brazo mientras la base navega')
         limits = self.get_limits()
-        current = self.joint_positions()
-        if limits is None or current is None:
-            raise CommandRejected('estado o límites del brazo no disponibles')
+        if limits is None:
+            raise CommandRejected('límites del brazo no disponibles')
         for name, p in zip(self.cfg.ARM_JOINTS, target):
             lim = limits[name]
             if not lim['soft_lower'] <= p <= lim['soft_upper']:
                 raise CommandRejected(
                     f'{name}: {math.degrees(p):.1f}° fuera de los límites '
                     f'[{math.degrees(lim["soft_lower"]):.0f}°, {math.degrees(lim["soft_upper"]):.0f}°]')
-        if not self._traj_client.server_is_ready():
-            raise CommandRejected('el controlador de trayectorias no responde')
+        speed = self._check_speed(speed)
+        self._check_can_move()
+        goal = self.planner.joint_goal(self.cfg.ARM_JOINTS, target, speed)
+        self._start_move(goal, who, label or 'postura', speed, target=[round(p, 4) for p in target])
 
-        # Duración: la articulación que más se mueve va a ARM_MOVE_MAX_VEL (o a
-        # su propio límite de velocidad si es menor)
-        duration = self.cfg.ARM_MOVE_MIN_TIME
-        for name, p, c in zip(self.cfg.ARM_JOINTS, target, current):
-            vmax = min(self.cfg.ARM_MOVE_MAX_VEL, limits[name]['velocity'])
-            duration = max(duration, abs(p - c) / vmax)
-        duration = round(duration, 2)
+    def move_tcp(self, pos, quat, who='?', label=None, speed=None, check=False):
+        """Lleva el TCP a una pose (en ARM_BASE_FRAME) con un plan de MoveIt.
+        Con check=True, al terminar se ejecuta check_tcp_orientation."""
+        speed = self._check_speed(speed)
+        self._check_can_move()
+        goal = self.planner.pose_goal(pos, quat, speed)
+        tcp_target = (tuple(pos), tuple(quat)) if check else None
+        self._start_move(goal, who, label or 'pose del TCP', speed, tcp_target=tcp_target)
 
-        # Parar el jog y cancelar un movimiento anterior
+    def _start_move(self, goal, who, label, speed, target=None, tcp_target=None):
+        """Común a postura y pose: para el jog, cancela lo anterior, pasa a modo
+        trayectoria si hace falta y manda el objetivo a MoveIt."""
         with self._lock:
             self._jog_active = False
             self._jog_vel = [0.0] * 7
@@ -526,17 +558,20 @@ class ArmController():
             raise CommandRejected('cambio de modo del brazo en curso; reintenta')
 
         job = next(self._move_job)
+        launch = lambda j: self._send_moveit(j, goal, label)   # noqa: E731
         with self._lock:
             self._move_current = job
             self._move = {'state': 'pending' if mode != 'trajectory' else 'sending',
-                          'label': label, 'target': [round(p, 4) for p in target],
-                          'duration': duration}
-        log.info('Brazo: ir a %s (%s), %.1f s', label or 'postura', who, duration)
+                          'label': label, 'speed': speed}
+            if target is not None:
+                self._move['target'] = target
+            self._tcp_target = tcp_target
+        log.info('Brazo: ir a %s con MoveIt al %d %% (%s)', label, round(speed * 100), who)
         if mode == 'trajectory':
-            self._send_trajectory(job, target, duration, who, label)
+            launch(job)
         else:
             with self._lock:
-                self._pending_move = (job, target, duration, who, label)
+                self._pending_move = (job, launch)
             try:
                 self.set_mode('trajectory', who)
             except CommandRejected:
@@ -545,21 +580,23 @@ class ArmController():
                     self._move = None
                 raise
 
-    def _send_trajectory(self, job, target, duration, who, label):
+    def _send_moveit(self, job, goal, label):
         with self._lock:
             if job != self._move_current:
                 return                          # sustituido mientras cambiaba el modo
-        goal = FollowJointTrajectory.Goal()
-        goal.trajectory.joint_names = list(self.cfg.ARM_JOINTS)
-        point = JointTrajectoryPoint()
-        point.positions = list(target)
-        point.velocities = [0.0] * len(target)      # llegar parado: perfil suave
-        point.time_from_start = duration_msg(duration)
-        goal.trajectory.points = [point]
-        with self._lock:
-            self._move = {**self._move, 'state': 'sending'}
-        future = self._traj_client.send_goal_async(goal)
+            self._move = {**self._move, 'state': 'planning'}
+        future = self.planner.send(goal, lambda msg: self._on_moveit_feedback(job, msg))
         future.add_done_callback(lambda f: self._on_move_response(job, f, label))
+
+    def _on_moveit_feedback(self, job, msg):
+        state = str(getattr(msg.feedback, 'state', '') or '').upper()
+        with self._lock:
+            if job != self._move_current or self._move is None:
+                return
+            if state == 'MONITOR' and self._move['state'] != 'active':
+                self._move = {**self._move, 'state': 'active', 'started': time.monotonic()}
+            elif state == 'PLANNING':
+                self._move = {**self._move, 'state': 'planning'}
 
     def _on_move_response(self, job, future, label):
         handle = future.result()
@@ -572,12 +609,11 @@ class ArmController():
         if not handle.accepted:
             with self._lock:
                 self._move = {**self._move, 'state': 'rejected'}
-            log.warning('Brazo: el controlador rechazó la trayectoria')
-            self.node.emit('warning', 'arm_move', 'Brazo: trayectoria rechazada por el controlador')
+            log.warning('Brazo: MoveIt rechazó la petición')
+            self.node.emit('warning', 'arm_move', 'Brazo: MoveIt rechazó la petición')
             return
         with self._lock:
             self._move_handle = handle
-            self._move = {**self._move, 'state': 'active', 'started': time.monotonic()}
         handle.get_result_async().add_done_callback(lambda f: self._on_move_result(job, f, label))
 
     def _on_move_result(self, job, future, label):
@@ -586,24 +622,67 @@ class ArmController():
             if job != self._move_current:
                 return
             self._move_handle = None
-        code = int(getattr(res.result, 'error_code', 0) or 0)
-        text = str(getattr(res.result, 'error_string', '') or '')
-        what = label or 'postura'
-        if res.status == GoalStatus.STATUS_SUCCEEDED and code == 0:
-            state = 'succeeded'
-            log.info('Brazo: %s alcanzada', what)
-            self.node.emit('info', 'arm_move', f'Brazo: {what} alcanzada')
+        code = int(getattr(getattr(res.result, 'error_code', None), 'val', 0) or 0)
+        if res.status == GoalStatus.STATUS_SUCCEEDED and code == MOVEIT_SUCCESS:
+            state, reason = 'succeeded', None
+            log.info('Brazo: movimiento a %s completado', label)
+            self.node.emit('info', 'arm_move', f'Brazo: movimiento a {label} completado')
         elif res.status == GoalStatus.STATUS_CANCELED:
-            state = 'canceled'
+            state, reason = 'canceled', None
         else:
-            state = 'aborted'
-            log.warning('Brazo: movimiento a %s fallido (status %d, código %d %s)',
-                        what, res.status, code, text)
-            self.node.emit('warning', 'arm_move',
-                           f'Brazo: no se alcanzó {what}' + (f' — {text}' if text else ''))
+            state, reason = 'aborted', error_text(code)
+            log.warning('Brazo: movimiento a %s fallido (status %d, código MoveIt %d: %s)',
+                        label, res.status, code, reason)
+            self.node.emit('warning', 'arm_move', f'Brazo: no se alcanzó {label} — {reason}')
         with self._lock:
             self._move = {k: v for k, v in self._move.items() if k != 'started'}
             self._move['state'] = state
+            if reason:
+                self._move['reason'] = reason
+            target = self._tcp_target if state == 'succeeded' else None
+            if target is not None:
+                self._move['check'] = {'state': 'checking'}
+        if target is not None:
+            # Se espera un poco para que TF refleje la posición final del brazo
+            timer = threading.Timer(self.cfg.TCP_CHECK_DELAY,
+                                    lambda: self.check_tcp_orientation(job, label, *target))
+            timer.daemon = True
+            timer.start()
+
+    # ------------------------------------------------------------ check del TCP
+    def check_tcp_orientation(self, job, label, target_pos, target_quat):
+        """Compara por TF el TCP real con el pedido (posición y eje de la
+        herramienta; el giro sobre su propio eje no cuenta). Deja el resultado en
+        move['check'] y avisa en el dashboard si está fuera de tolerancia.
+        Por ahora solo verifica: la corrección corta llegará con Servo (5.4)."""
+        cfg = self.cfg
+        level, text = None, None
+        try:
+            tf = self.node.tf_buffer.lookup_transform(cfg.ARM_BASE_FRAME, cfg.ARM_TCP_FRAME, Time())
+        except TransformException as e:
+            check = {'state': 'error', 'message': f'sin TF del TCP ({e})'}
+            level, text = 'warning', f'Brazo: no se pudo comprobar el TCP en {label}: {check["message"]}'
+        else:
+            t, r = tf.transform.translation, tf.transform.rotation
+            pos_err, ang_err = tcp_errors((t.x, t.y, t.z), (r.x, r.y, r.z, r.w),
+                                          target_pos, target_quat)
+            ok = pos_err <= cfg.TCP_CHECK_POS_TOL and ang_err <= cfg.TCP_CHECK_ANGLE_TOL
+            check = {'state': 'ok' if ok else 'out',
+                     'pos_error': round(pos_err, 4), 'angle_error': round(ang_err, 2),
+                     'pos_tol': cfg.TCP_CHECK_POS_TOL, 'angle_tol': cfg.TCP_CHECK_ANGLE_TOL}
+            errs = f'{pos_err * 1000:.1f} mm · {ang_err:.2f}°'
+            if ok:
+                level, text = 'info', f'Brazo: TCP verificado en {label} ({errs})'
+            else:
+                level, text = 'warning', (f'Brazo: TCP fuera de tolerancia en {label}: {errs} '
+                                          f'(máx {cfg.TCP_CHECK_POS_TOL * 1000:.0f} mm · '
+                                          f'{cfg.TCP_CHECK_ANGLE_TOL:.0f}°)')
+        with self._lock:
+            if job != self._move_current or self._move is None:
+                return                  # ya hay otro movimiento: este check no vale
+            self._move = {**self._move, 'check': check}
+        (log.info if level == 'info' else log.warning)(text)
+        self.node.emit(level, 'arm_check', text)
 
     def cancel_move(self, who='?', quiet=False):
         """Cancela el movimiento a postura en curso (si lo hay)."""

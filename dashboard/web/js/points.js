@@ -226,9 +226,17 @@ export class PointsPanel {
     if (!r.ok) this.notify('warning', `No se pudo borrar: ${r.error}`);
   }
 
+  /** Navega al punto. En los de trabajo, el gateway hace además el ajuste fino al llegar. */
   goToPoint(pt) {
-    if (!this.send({ type: 'goal', x: pt.x, y: pt.y, yaw: pt.yaw })) {
+    if (!this.send({ type: 'go_point', point_id: pt.id })) {
       this.notify('warning', 'Sin conexión: el goal no se ha enviado');
+    }
+  }
+
+  /** Solo el ajuste fino frente a la pared (el robot ya debe estar delante). */
+  adjustAtPoint(pt) {
+    if (!this.send({ type: 'approach', point_id: pt.id })) {
+      this.notify('warning', 'Sin conexión: el ajuste no se ha enviado');
     }
   }
 
@@ -286,7 +294,9 @@ export class PointsPanel {
         info(`${ICON[pt.kind] || ICON.move} ${pt.name}`, sub),
         actions(
           button('Ir', 'needs-control', () => this.goToPoint(pt),
-            work ? 'Navegar a la pose de llegada frente a la pared' : 'Navegar a este punto'),
+            work ? 'Navegar frente a la pared y ajustar con el lidar al llegar' : 'Navegar a este punto'),
+          ...(work ? [button('Ajustar', 'needs-control', () => this.adjustAtPoint(pt),
+            'Solo el ajuste fino con el lidar (el robot ya debe estar delante de la pared)')] : []),
           work
             ? button('✎', 'needs-operator', () => this.editWorkPoint(pt), 'Editar pared, distancia y rejilla')
             : button('✎', 'needs-operator', () => this.renamePoint(pt), 'Renombrar'),

@@ -1,5 +1,8 @@
 // Panel del brazo: jog articular (mantener pulsado − / +), estado de las 7
-// articulaciones con sus límites, pose del TCP y posturas guardadas.
+// articulaciones con sus límites, pose del TCP, posturas guardadas y, frente a
+// un punto de trabajo, la rejilla de tornillos («ir a tornillo»).
+// Ir a postura e ir a tornillo los planifica MoveIt en el gateway (5.3), a la
+// velocidad elegida en «Velocidad MoveIt».
 //
 // El jog manda {type:'arm_jog', v:[7 x rad/s]} a 10 Hz mientras se mantiene
 // pulsado un botón; al soltar manda v=0 una vez. Si se pierde la conexión, el
@@ -11,8 +14,18 @@ const SEND_PERIOD_MS = 100;
 const NEAR_LIMIT = 10 * Math.PI / 180;     // aviso visual a menos de 10° del límite
 const deg = (rad) => rad * 180 / Math.PI;
 const MODE_TEXT = { jog: 'jog', trajectory: 'trayectoria', switching: 'cambiando…', none: 'sin controlador', unknown: '…' };
-const MOVE_TEXT = { pending: 'preparando', sending: 'enviando', active: 'moviendo', succeeded: 'alcanzada',
-  aborted: 'FALLIDO', canceled: 'cancelado', rejected: 'RECHAZADO' };
+const MOVE_TEXT = { pending: 'preparando', sending: 'enviando', planning: 'planificando', active: 'moviendo',
+  succeeded: 'alcanzada', aborted: 'FALLIDO', canceled: 'cancelado', rejected: 'RECHAZADO' };
+const RUNNING = ['pending', 'sending', 'planning', 'active'];
+
+// Resultado de check_tcp_orientation (move.check)
+function checkText(c) {
+  if (c.state === 'checking') return 'comprobando TCP…';
+  if (c.state === 'error') return `TCP sin comprobar — ${c.message}`;
+  const errs = `${(c.pos_error * 1000).toFixed(1)} mm · ${c.angle_error.toFixed(2)}°`;
+  return c.state === 'ok' ? `TCP verificado ✓ (${errs})`
+    : `TCP FUERA DE TOLERANCIA: ${errs} (máx ${(c.pos_tol * 1000).toFixed(0)} mm · ${c.angle_tol}°)`;
+}
 
 export class ArmPanel {
   constructor({ send, notify }) {
@@ -27,6 +40,8 @@ export class ArmPanel {
     this.poses = [];
     this.held = null;               // { i, dir, btn }
     this.timer = null;
+    this.planSpeed = 0.25;          // velocidad de MoveIt (fracción)
+    this.workHere = null;           // state.work_here: punto de trabajo frente al que está el robot
 
     this._buildRows();
     this._bind();
@@ -70,10 +85,14 @@ export class ArmPanel {
     }
 
     const move = arm.move;
-    const moving = move && ['pending', 'sending', 'active'].includes(move.state);
+    const moving = move && RUNNING.includes(move.state);
+    const mi = this.$('arm-moveit');
+    mi.textContent = arm.moveit_ready ? 'MoveIt listo' : 'MoveIt no disponible: ir a postura / tornillo desactivados';
+    mi.className = 'arm-moveit ' + (arm.moveit_ready ? 'ok' : 'bad');
     if (moving) {
-      const pct = move.progress != null ? ` ${Math.round(move.progress * 100)}%` : '';
-      status.textContent = `Yendo a ${move.label || 'postura'} · ${MOVE_TEXT[move.state]}${pct} (${move.duration}s)`;
+      const t = move.elapsed != null ? ` ${move.elapsed}s` : '';
+      const v = move.speed != null ? ` · ${Math.round(move.speed * 100)}%` : '';
+      status.textContent = `Yendo a ${move.label || 'postura'} · ${MOVE_TEXT[move.state]}${t}${v}`;
       status.className = 'arm-status moving';
     } else if (arm.jog_active) {
       status.textContent = 'Jog en curso';
@@ -81,9 +100,14 @@ export class ArmPanel {
     } else if (!arm.limits) {
       status.textContent = 'Esperando límites del brazo (robot_description)';
       status.className = 'arm-status bad';
+    } else if (move && move.state === 'succeeded' && move.check) {
+      status.textContent = `${move.label || 'Pose'}: ${checkText(move.check)}`;
+      status.className = 'arm-status' + (move.check.state === 'ok' ? ' ok'
+        : move.check.state === 'checking' ? ' moving' : ' bad');
     } else if (move && move.state !== 'succeeded') {
-      status.textContent = `Último movimiento a ${move.label || 'postura'}: ${MOVE_TEXT[move.state] || move.state}`;
-      status.className = 'arm-status';
+      const why = move.reason ? ` — ${move.reason}` : '';
+      status.textContent = `Último movimiento a ${move.label || 'postura'}: ${MOVE_TEXT[move.state] || move.state}${why}`;
+      status.className = 'arm-status' + (move.state === 'aborted' ? ' bad' : '');
     } else {
       status.textContent = 'Mantén pulsado − / + para mover una articulación';
       status.className = 'arm-status';
@@ -171,9 +195,44 @@ export class ArmPanel {
   }
 
   goToPose(p) {
-    if (!this.send({ type: 'arm_move', pose_id: p.id })) {
+    if (!this.send({ type: 'arm_move', pose_id: p.id, speed: this.planSpeed })) {
       this.notify('warning', 'Sin conexión: la orden no se ha enviado');
     }
+  }
+
+  // ------------------------------------------------------------ tornillos (5.3)
+  /** state.work_here: {point_id, name, screws: [{row, col, z, u}]} o null. */
+  setWorkHere(w) {
+    const key = w ? JSON.stringify(w) : null;
+    if (key === this._workKey) return;
+    this._workKey = key;
+    this.workHere = w;
+    this.$('arm-screws').classList.toggle('hidden', !w);
+    const grid = this.$('screw-grid');
+    grid.replaceChildren();
+    if (!w) return;
+    this.$('arm-screws-title').textContent = `Tornillos · ${w.name}`;
+    const rows = Math.max(...w.screws.map((s) => s.row)) + 1;
+    const cols = Math.max(...w.screws.map((s) => s.col)) + 1;
+    grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    // Fila de arriba primero (como se ve la pared); columna 0 a la izquierda
+    for (let r = rows - 1; r >= 0; r--) {
+      for (let c = 0; c < cols; c++) {
+        const s = w.screws.find((x) => x.row === r && x.col === c);
+        const b = document.createElement('button');
+        b.className = 'ghost needs-control';
+        b.innerHTML = `F${r + 1}·C${c + 1}<small>${s.z.toFixed(2)} m</small>`;
+        b.title = `TCP delante del tornillo (altura ${s.z.toFixed(2)} m, ${s.u >= 0 ? '+' : ''}${(s.u * 100).toFixed(0)} cm del centro)`;
+        b.addEventListener('click', () => this.goToScrew(r, c));
+        grid.append(b);
+      }
+    }
+  }
+
+  goToScrew(row, col) {
+    if (!this.workHere) return;
+    const msg = { type: 'arm_screw', point_id: this.workHere.point_id, row, col, speed: this.planSpeed };
+    if (!this.send(msg)) this.notify('warning', 'Sin conexión: la orden no se ha enviado');
   }
 
   _renderPoses() {
@@ -255,6 +314,10 @@ export class ArmPanel {
     document.querySelectorAll('[data-arm-speed]').forEach((b) => b.addEventListener('click', () => {
       document.querySelectorAll('[data-arm-speed]').forEach((x) => x.classList.toggle('active', x === b));
       this.scale = parseFloat(b.dataset.armSpeed);
+    }));
+    document.querySelectorAll('[data-arm-plan-speed]').forEach((b) => b.addEventListener('click', () => {
+      document.querySelectorAll('[data-arm-plan-speed]').forEach((x) => x.classList.toggle('active', x === b));
+      this.planSpeed = parseFloat(b.dataset.armPlanSpeed);
     }));
     this.$('btn-save-arm-pose').addEventListener('click', () => this.savePose());
     this.$('btn-arm-cancel').addEventListener('click', () => this.send({ type: 'arm_cancel' }));

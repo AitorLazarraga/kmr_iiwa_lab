@@ -9,7 +9,16 @@ Responsabilidades:
     compartido: todos los clientes lo ven hasta que se alcanza o se borra.
   - Ejecutar rutas guardadas con un secuenciador propio: un NavigateToPose por
     parada, espera configurable en cada una y política ante fallos
-    (cfg.ROUTE_ON_FAILURE). En la Fase 6 cada parada ejecutará además una tarea.
+    (cfg.ROUTE_ON_FAILURE).
+  - Puntos de trabajo (6.3/6.4): al llegar con Nav2 se lanza el acercamiento
+    fino a la pared (acción ApproachWall del nodo kuka_nav/wall_approach.py).
+    Vale para «Ir» a un punto de trabajo, para «Ajustar» (solo el acercamiento)
+    y para las paradas de trabajo de una ruta. El acercamiento cuenta como
+    navegación: mismos bloqueos con el brazo y la teleop, y la PARADA lo cancela.
+  - Brazo frente a la pared (5.3): tras un ajuste correcto, la pared del punto
+    se añade a la escena de colisiones de MoveIt y se puede llevar el TCP
+    delante de cada tornillo de la rejilla («ir a tornillo»). Al iniciar otra
+    navegación, la pared se retira.
   - Emitir eventos (avisos y emergencias) para la barra de avisos.
   - Cámara del brazo: guarda la última imagen y la comprime a JPEG bajo
     demanda (una vez por fotograma aunque la vean varios clientes).
@@ -56,6 +65,16 @@ except ImportError:  # pragma: no cover
     cv2 = np = None
 
 
+# Acción propia del acercamiento fino (paquete kuka_interfaces). Si el gateway
+# se arranca sin ese paquete en el entorno, todo lo demás funciona y los puntos
+# de trabajo se rechazan con un mensaje claro.
+try:
+    from kuka_interfaces.action import ApproachWall
+except ImportError:  # pragma: no cover
+    ApproachWall = None
+
+from . import planner as plannerlib
+from . import work as workgeo
 from .arm import ArmController
 from .errors import CommandRejected  # noqa: F401  (main.py la importa desde aquí)
 
@@ -102,6 +121,7 @@ class RosBridge(Node):
         self._goal_handle = None
         self._wait_timer = None
         self._job = 0                # trabajo de navegación vigente
+        self._work_here = None       # punto de trabajo frente al que está ajustado el robot
 
         # TF para la pose en el mapa
         self.tf_buffer = Buffer()
@@ -117,6 +137,12 @@ class RosBridge(Node):
                                  qos_profile_sensor_data)
 
         self.nav_client = ActionClient(self, NavigateToPose, cfg.NAV_ACTION)
+        if ApproachWall is not None:
+            self.approach_client = ActionClient(self, ApproachWall, cfg.APPROACH_ACTION)
+        else:
+            self.approach_client = None
+            log.warning('kuka_interfaces no disponible: los puntos de trabajo no podrán '
+                        'ajustarse (source ~/ros2_ws/install/setup.bash antes del gateway)')
 
         # Cámara del brazo
         self._cam_lock = threading.Lock()
@@ -304,12 +330,17 @@ class RosBridge(Node):
         with self._lock:
             pose = dict(self._pose) if self._pose else None
             nav = dict(self._nav)
+            nav.pop('work', None)                       # datos internos del ajuste
+            if nav.get('approach') is not None:
+                nav['approach'] = dict(nav['approach'])
             if nav.get('route') is not None:
                 route = dict(nav['route'])
                 wait_until = route.pop('wait_until', None)
                 if wait_until is not None:
                     route['wait_remaining'] = round(max(0.0, wait_until - time.monotonic()), 1)
                 route['skipped'] = list(route['skipped'])
+                route['stops'] = [{k: v for k, v in st.items() if k != 'work'}
+                                  for st in route['stops']]
                 nav['route'] = route
         return {'type': 'state',
                 'ros_ok': self._ros_ok,
@@ -318,8 +349,19 @@ class RosBridge(Node):
                 'route_running': nav['state'] in NAV_RUNNING,
                 'teleop_active': self._teleop_active,
                 'nav2_ready': self.nav_client.server_is_ready(),
+                'approach_ready': self.approach_ready(),
                 'camera': self.camera_status(),
-                'arm': self.arm.get_state()}
+                'arm': self.arm.get_state(),
+                'work_here': self._work_here_state()}
+
+    def _work_here_state(self):
+        with self._lock:
+            w = self._work_here
+        if w is None:
+            return None
+        return {'point_id': w['point_id'], 'name': w['name'],
+                'screws': [{'row': sc['row'], 'col': sc['col'], 'z': sc['z'], 'u': sc['u']}
+                           for sc in workgeo.screws(w['work']['wall'], w['work']['grid'])]}
 
     def get_config(self):
         """Límites que el frontend necesita para dibujar los controles."""
@@ -363,6 +405,11 @@ class RosBridge(Node):
             self._reject(who, f'wz={wz:.3f} fuera de rango (máx ±{c.MAX_WZ:.3f})')
 
         moving = any(abs(v) > 1e-4 for v in (vx, vy, wz))
+        if moving:
+            with self._lock:
+                left, self._work_here = self._work_here, None
+            if left is not None:
+                log.info('Teleop: el robot deja de estar ajustado frente a %s', left['name'])
         if moving and self.arm.moving():
             self._reject(who, 'no se puede mover la base mientras el brazo se mueve')
         if moving and self.nav_running():
@@ -428,17 +475,21 @@ class RosBridge(Node):
             nav = self._nav
         if running:
             what = (f'la ruta {nav["route"]["name"]}' if nav.get('mode') == 'route'
+                    else 'el ajuste en curso' if nav.get('mode') == 'approach'
                     else 'el goal anterior')
             log.info('Navegación sustituida por %s: se cancela %s', who, what)
             self._emit('info', 'nav_replaced', f'Se cancela {what} para iniciar una nueva navegación')
 
     def _new_job(self):
-        """Cancela lo que esté en marcha y devuelve el número del trabajo nuevo."""
+        """Cancela lo que esté en marcha y devuelve el número del trabajo nuevo.
+        La base va a moverse: el robot deja de estar frente a la pared."""
         with self._lock:
             self._job += 1
             job = self._job
             handle, self._goal_handle = self._goal_handle, None
             timer, self._wait_timer = self._wait_timer, None
+            self._work_here = None
+        self.arm.planner.clear_wall()
         if timer is not None:
             timer.cancel()
             self.destroy_timer(timer)
@@ -457,16 +508,54 @@ class RosBridge(Node):
         if not self.nav_client.server_is_ready():
             self._reject(who, 'Nav2 no está disponible (navigate_to_pose sin servidor)')
 
-    def send_goal(self, x, y, yaw, who='?'):
+    def approach_ready(self):
+        return self.approach_client is not None and self.approach_client.server_is_ready()
+
+    def _check_approach(self, who):
+        if self.approach_client is None:
+            self._reject(who, 'el gateway no tiene kuka_interfaces: no puede ajustar puntos de trabajo')
+        if not self.approach_client.server_is_ready():
+            self._reject(who, 'el nodo de ajuste (wall_approach) no está en marcha')
+
+    def send_goal(self, x, y, yaw, who='?', work=None, name=None, point_id=None):
+        """Goal suelto. Con `work` ({wall, distance}) es un punto de trabajo: al
+        llegar se lanza el acercamiento fino a la pared."""
         self._check_pose_args(who, x, y, yaw)
         self._check_nav2(who)
+        if work:
+            self._check_approach(who)
         self._replace_running(who)
         job = self._new_job()
-        log.info('GOAL de %s: x=%.2f y=%.2f yaw=%.2f', who, x, y, yaw)
+        log.info('GOAL de %s: x=%.2f y=%.2f yaw=%.2f%s', who, x, y, yaw,
+                 f' (punto de trabajo {name}: ajuste al llegar)' if work else '')
         with self._lock:
             self._nav = {'mode': 'goal', 'state': 'sending',
                          'goal': {'x': round(x, 3), 'y': round(y, 3), 'yaw': round(yaw, 4)}}
+            if name:
+                self._nav['target'] = name
+            if work:
+                self._nav['work'] = work
+                self._nav['phase'] = 'navigating'
+                self._nav['point_id'] = point_id
         self._navigate(job, x, y, yaw)
+
+    def approach(self, point, who='?'):
+        """Solo el acercamiento fino frente a un punto de trabajo (botón «Ajustar»):
+        el robot ya tiene que estar delante de la pared."""
+        if point.get('kind') != 'work' or not point.get('work'):
+            self._reject(who, f'{point.get("name")!r} no es un punto de trabajo')
+        if self.arm.moving():
+            self._reject(who, 'no se puede ajustar la base mientras el brazo se mueve')
+        self._check_approach(who)
+        self._replace_running(who)
+        job = self._new_job()
+        log.info('AJUSTE de %s frente a %s', who, point['name'])
+        with self._lock:
+            self._nav = {'mode': 'approach', 'state': 'sending', 'phase': 'adjusting',
+                         'target': point['name'], 'work': point['work'], 'point_id': point['id'],
+                         'goal': {'x': round(point['x'], 3), 'y': round(point['y'], 3),
+                                  'yaw': round(point['yaw'], 4)}}
+        self._approach(job, point['work'])
 
     def run_route(self, route, who='?'):
         """route: dict de la base de datos con 'id', 'name' y 'stops'
@@ -477,6 +566,9 @@ class RosBridge(Node):
         for s in stops:
             self._check_pose_args(who, s['x'], s['y'], s['yaw'])
         self._check_nav2(who)
+        n_work = sum(1 for s in stops if s.get('kind') == 'work' and s.get('work'))
+        if n_work:
+            self._check_approach(who)
         self._replace_running(who)
         job = self._new_job()
         log.info('RUTA %s iniciada por %s: %d paradas', route['name'], who, len(stops))
@@ -490,7 +582,10 @@ class RosBridge(Node):
                     'total': len(stops), 'current': 0, 'phase': 'navigating',
                     'reached': 0, 'skipped': [],
                     'stops': [{'name': s['name'], 'x': s['x'], 'y': s['y'],
-                               'yaw': s['yaw'], 'wait_s': s['wait_s']} for s in stops],
+                               'yaw': s['yaw'], 'wait_s': s['wait_s'],
+                               'kind': s.get('kind', 'move'), 'work': s.get('work'),
+                               'point_id': s.get('point_id')}
+                              for s in stops],
                 },
             }
         self._route_next(job)
@@ -510,6 +605,7 @@ class RosBridge(Node):
                 stop = r['stops'][i]
                 r['phase'] = 'navigating'
                 r.pop('wait_until', None)
+                self._nav.pop('approach', None)
                 self._nav['goal'] = {'x': stop['x'], 'y': stop['y'], 'yaw': stop['yaw']}
                 self._nav['state'] = 'active'
                 self._nav.pop('distance_remaining', None)
@@ -652,9 +748,24 @@ class RosBridge(Node):
 
         if mode == 'route':
             if status == GoalStatus.STATUS_SUCCEEDED:
-                self._route_stop_reached(job)
+                with self._lock:
+                    r = self._nav['route']
+                    stop = r['stops'][r['current']]
+                if stop.get('kind') == 'work' and stop.get('work'):
+                    log.info('RUTA %s: en %s, ajuste frente a la pared', r['name'], stop['name'])
+                    self._approach(job, stop['work'])
+                else:
+                    self._route_stop_reached(job)
             elif status != GoalStatus.STATUS_CANCELED:
                 self._route_stop_failed(job, name, detail)
+            return
+
+        # goal suelto a un punto de trabajo: al llegar, ajuste fino
+        with self._lock:
+            work = self._nav.get('work')
+        if status == GoalStatus.STATUS_SUCCEEDED and work:
+            log.info('Punto de trabajo alcanzado: ajuste frente a la pared')
+            self._approach(job, work)
             return
 
         # goal suelto
@@ -674,6 +785,145 @@ class RosBridge(Node):
             self._emit('warning', 'nav_failed',
                        f'Navegación fallida: {name}{detail}. El goal sigue marcado.')
 
+    # --- acción ApproachWall (ajuste fino frente a la pared, 6.4)
+    def _approach(self, job, work):
+        """Lanza el acercamiento fino con los datos de un punto de trabajo."""
+        if not self.approach_ready():                 # p. ej. el nodo se ha caído durante la ruta
+            self._approach_done(job, False, 'el nodo de ajuste (wall_approach) no está en marcha', None)
+            return
+        (x1, y1), (x2, y2) = work['wall']
+        goal = ApproachWall.Goal()
+        goal.wall_p1.x, goal.wall_p1.y = float(x1), float(y1)
+        goal.wall_p2.x, goal.wall_p2.y = float(x2), float(y2)
+        goal.distance = float(work['distance'])
+        goal.lateral = 0.0
+        with self._lock:
+            if job != self._job:
+                return
+            self._nav['state'] = 'active'
+            self._nav.pop('distance_remaining', None)
+            self._nav['approach'] = {'phase': 'iniciando'}
+            if self._nav.get('mode') == 'route':
+                self._nav['route']['phase'] = 'adjusting'
+            else:
+                self._nav['phase'] = 'adjusting'
+        future = self.approach_client.send_goal_async(
+            goal, feedback_callback=lambda msg: self._on_approach_feedback(job, msg))
+        future.add_done_callback(lambda f: self._on_approach_response(job, f))
+
+    def _on_approach_response(self, job, future):
+        handle = future.result()
+        with self._lock:
+            stale = job != self._job
+        if stale:
+            if handle.accepted:
+                handle.cancel_goal_async()
+            return
+        if not handle.accepted:
+            self._approach_done(job, False, 'el nodo de ajuste rechazó la meta '
+                                            '(¿ya hay otro ajuste en curso?)', None)
+            return
+        with self._lock:
+            self._goal_handle = handle
+        handle.get_result_async().add_done_callback(lambda f: self._on_approach_result(job, f))
+
+    def _on_approach_feedback(self, job, msg):
+        fb = msg.feedback
+        with self._lock:
+            if job != self._job or self._nav['state'] not in NAV_RUNNING:
+                return
+            self._nav['approach'] = {
+                'phase': fb.phase,
+                'distance_error': round(fb.distance_error, 4),
+                'lateral_error': round(fb.lateral_error, 4),
+                'angle_error': round(fb.angle_error, 4),
+                'points': fb.wall_points,
+            }
+
+    def _on_approach_result(self, job, future):
+        res = future.result()
+        with self._lock:
+            if job != self._job:
+                return
+            self._goal_handle = None
+        if res.status == GoalStatus.STATUS_CANCELED:
+            return                     # lo ha cancelado el gateway: cancel_goal ya lo gestiona
+        r = res.result
+        ok = res.status == GoalStatus.STATUS_SUCCEEDED and bool(r.success)
+        finals = {'distance_error': round(r.final_distance_error, 4),
+                  'lateral_error': round(r.final_lateral_error, 4),
+                  'angle_error': round(r.final_angle_error, 4)}
+        self._approach_done(job, ok, r.message or GOAL_STATUS_NAMES.get(res.status, ''), finals)
+
+    def _approach_done(self, job, ok, message, finals):
+        with self._lock:
+            if job != self._job:
+                return
+            mode = self._nav.get('mode')
+            a = dict(self._nav.get('approach') or {})
+            if finals:
+                a.update(finals)
+            a['phase'] = 'hecho' if ok else 'fallido'
+            a['message'] = message
+            self._nav['approach'] = a
+            if mode == 'route':
+                stop = self._nav['route']['stops'][self._nav['route']['current']]
+                target, work, point_id = stop['name'], stop.get('work'), stop.get('point_id')
+            else:
+                target = self._nav.get('target', 'el punto')
+                work, point_id = self._nav.get('work'), self._nav.get('point_id')
+            if ok and work:
+                self._work_here = {'point_id': point_id, 'name': target, 'work': work}
+        errs = (f' (d {finals["distance_error"] * 1000:+.0f} mm, lat {finals["lateral_error"] * 1000:+.0f} mm, '
+                f'θ {math.degrees(finals["angle_error"]):+.1f}°)') if finals else ''
+        if ok:
+            log.info('AJUSTE en %s correcto%s', target, errs)
+            if work:
+                self.arm.planner.set_wall(target, work)
+        else:
+            log.warning('AJUSTE en %s fallido: %s%s', target, message, errs)
+
+        if mode == 'route':
+            if ok:
+                self._route_stop_reached(job)
+            else:
+                self._route_stop_failed(job, 'ajuste', f' — ajuste fallido: {message}')
+            return
+        with self._lock:
+            self._nav['state'] = 'succeeded' if ok else 'aborted'
+            self._nav.pop('phase', None)
+            if ok:
+                self._nav['goal'] = None
+        if ok:
+            self._emit('info', 'approach_succeeded', f'Posicionado frente a {target}{errs}')
+        else:
+            self._emit('warning', 'approach_failed', f'Ajuste frente a {target} fallido: {message}{errs}')
+
+    # --- brazo frente a la pared (5.3)
+    def arm_to_screw(self, point_id, row, col, speed=None, who='?'):
+        """Lleva el TCP delante de un tornillo de la rejilla del punto de trabajo
+        frente al que está ajustado el robot."""
+        with self._lock:
+            w = self._work_here
+        if w is None or w['point_id'] != point_id:
+            self._reject(who, 'el robot no está ajustado frente a ese punto de trabajo: '
+                              'usa «Ir» o «Ajustar» primero')
+        screw = next((sc for sc in workgeo.screws(w['work']['wall'], w['work']['grid'])
+                      if sc['row'] == row and sc['col'] == col), None)
+        if screw is None:
+            self._reject(who, f'el tornillo F{row + 1}·C{col + 1} no existe en la rejilla')
+        # Objetivo en el frame de la base (perpendicular a la pared real, ver
+        # planner.screw_tcp_pose_base) y de ahí, por TF, a la base del brazo.
+        c = self.cfg
+        pos_base, quat_base = plannerlib.screw_tcp_pose_base(
+            w['work']['distance'], screw, c.SCREW_STANDOFF, c.BASE_HALF_LENGTH, c.ARM_OFFSET_Y,
+            base_height=self.arm.planner.base_height())
+        pos, quat = self.arm.planner.to_arm_base(c.BASE_FRAME, pos_base, quat_base)
+        log.info('TORNILLO F%d·C%d de %s (%s): TCP en %s (%.3f, %.3f, %.3f), a %.2f m de la pared',
+                 row + 1, col + 1, w['name'], who, c.BASE_FRAME, *pos_base, c.SCREW_STANDOFF)
+        self.arm.move_tcp(pos, quat, who=who, speed=speed,
+                          label=f'tornillo F{row + 1}·C{col + 1} de {w["name"]}', check=True)
+
     def nav_running(self):
         with self._lock:
             return self._nav['state'] in NAV_RUNNING
@@ -690,6 +940,7 @@ class RosBridge(Node):
                 self._nav['state'] = 'canceled'
                 self._nav['goal'] = None
                 self._nav.pop('distance_remaining', None)
+                self._nav.pop('phase', None)
                 if 'route' in self._nav:
                     self._nav['route'].pop('wait_until', None)
                     self._nav['route']['phase'] = 'done'
@@ -699,6 +950,9 @@ class RosBridge(Node):
                          r['current'] + 1, r['total'])
                 self._emit('info', 'nav_canceled',
                            f'Ruta {r["name"]} cancelada en la parada {r["current"] + 1}/{r["total"]}')
+            elif nav.get('mode') == 'approach' or nav.get('phase') == 'adjusting':
+                log.info('Ajuste cancelado por %s', who)
+                self._emit('info', 'nav_canceled', 'Ajuste frente a la pared cancelado')
             else:
                 log.info('Navegación cancelada por %s', who)
                 self._emit('info', 'nav_canceled', 'Navegación cancelada')

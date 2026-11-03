@@ -36,6 +36,8 @@ TELEOP_TOPIC = _env('TELEOP_TOPIC', '/cmd_vel_nav')
 SCAN_TOPIC = _env('SCAN_TOPIC', '/kmr_iiwa/scan')
 MAP_TOPIC = _env('MAP_TOPIC', '/map')
 NAV_ACTION = _env('NAV_ACTION', '/navigate_to_pose')
+# Acercamiento fino a la pared (paso 6.4): acción del nodo kuka_nav/wall_approach.py
+APPROACH_ACTION = _env('APPROACH_ACTION', '/kmr_iiwa/approach_wall')
 
 CAMERA_TOPIC = _env('CAMERA_TOPIC', '/kmr_iiwa/arm_camera/image')
 
@@ -87,6 +89,51 @@ ARM_MAX_TRACKING_ERROR = math.radians(_env_float('ARM_MAX_TRACKING_ERROR_DEG', 6
 # Ir a postura (trayectoria): velocidad máxima de la articulación que más se mueve
 ARM_MOVE_MAX_VEL = math.radians(_env_float('ARM_MOVE_MAX_VEL_DEG', 20.0))  # rad/s
 ARM_MOVE_MIN_TIME = _env_float('ARM_MOVE_MIN_TIME', 1.5)                    # s
+
+# --- MoveIt (paso 5.3) ----------------------------------------------------------
+# Los movimientos "ir a postura" e "ir a tornillo" se planifican con MoveIt
+# (comprobando colisiones). Si move_group no está en marcha, se rechazan.
+MOVEIT_ACTION = _env('MOVEIT_ACTION', '/kmr_iiwa/move_action')
+MOVEIT_SCENE_SERVICE = _env('MOVEIT_SCENE_SERVICE', '/kmr_iiwa/apply_planning_scene')
+MOVEIT_GROUP = _env('MOVEIT_GROUP', 'arm')
+MOVEIT_PLANNING_TIME = _env_float('MOVEIT_PLANNING_TIME', 5.0)        # s por intento
+# Velocidad (fracción de la máxima de cada articulación) que se puede elegir en
+# el dashboard, y la de partida.
+MOVEIT_SPEEDS = (0.10, 0.25, 0.50)
+MOVEIT_DEFAULT_SPEED = 0.25
+# Ir a tornillo: el TCP (cara del portapuntas) se coloca a esta distancia de la
+# cara de la pared, con la herramienta perpendicular. El tornillo sobresale
+# 5-8 cm del TCP, así que su punta queda a unos 4-7 cm de la pared.
+SCREW_STANDOFF = _env_float('SCREW_STANDOFF', 0.12)                    # m
+# Caja que representa la pared del punto de trabajo en la escena de MoveIt
+WORK_WALL_THICKNESS = 0.10      # m, hacia dentro desde la cara marcada
+WORK_WALL_HEIGHT = 2.5          # m desde el suelo
+# Tolerancias que se piden a MoveIt para la pose del TCP. Tienen que ser más
+# estrictas que las del check (abajo): si no, MoveIt puede dar por bueno un
+# objetivo que luego el check marca como fuera de tolerancia.
+MOVEIT_POSITION_TOL = 0.001     # m (radio de la esfera de la restricción de posición)
+MOVEIT_AXIS_TOL = 0.01          # rad (≈0,6°) en cada eje de la orientación de la herramienta
+
+# --- Check del TCP (check_tcp_orientation) ---------------------------------
+# Tras llegar delante de un tornillo se compara por TF el TCP real con el
+# pedido. Fuera de tolerancia -> aviso en el dashboard (y, con Servo en el 5.4,
+# corrección corta).
+TCP_CHECK_POS_TOL = 0.002       # m
+TCP_CHECK_ANGLE_TOL = 1.0       # ° entre el eje de la herramienta real y el pedido
+TCP_CHECK_DELAY = 0.3           # s de espera tras terminar el movimiento (TF al día)
+# Corrección con Servo (5.4): por encima de esto no se corrige, se para y se avisa
+TCP_CORRECTION_MAX_POS = 0.01   # m
+TCP_CORRECTION_MAX_ANGLE = 3.0  # °
+TCP_CORRECTION_ATTEMPTS = 3
+
+# --- Desplazamiento lateral entre tornillos (ShiftAlongWall, secuenciador) ---
+# Valores acordados; los usará el secuenciador cuando exista.
+SHIFT_MAX_SPEED = 0.3           # m/s
+SHIFT_ACCEL = 0.5               # m/s²
+SHIFT_MAX_DISTANCE = 1.0        # m: hasta aquí, con el brazo a SCREW_STANDOFF y sin postura segura
+SHIFT_TOL_DISTANCE = 0.005      # m  \
+SHIFT_TOL_ANGLE = 0.5           # °   > comprobación final tras el desplazamiento
+SHIFT_TOL_LATERAL = 0.01        # m  /
 
 # --- Puntos de trabajo (Fase 6.3) ---------------------------------------------
 # Distancia por defecto del frontal del robot a la cara de la pared. Con la

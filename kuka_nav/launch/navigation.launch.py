@@ -53,6 +53,17 @@ def generate_launch_description():
         parameters=[{'use_sim_time': use_sim_time}],
     )
 
+    wall_approach = Node(
+        package='kuka_nav',
+        executable='wall_approach.py',          # el nombre con el que se instala el script
+        name='wall_approach',                   # debe coincidir con la clave del YAML
+        output='screen',
+        parameters=[
+            os.path.join(pkg, 'config', 'wall_approach.yaml'),
+            {'use_sim_time': LaunchConfiguration('use_sim_time')},
+        ],
+    )
+
     # SLAM Toolbox en modo localización: carga el mapa guardado
     slam_localization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -88,4 +99,5 @@ def generate_launch_description():
         slam_mapping,
         slam_localization,
         nav2,
+        wall_approach,
     ])

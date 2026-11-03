@@ -44,7 +44,9 @@ WebSocket /ws (requiere sesión; se cierra con código 4401 si no la hay)
     {"type": "config", "limits": {...}, "user": {username, role}}      al conectar
     {"type": "state", "ros_ok", "pose", "nav", "route_running", "teleop_active",
      "nav2_ready", "control": {holder: {username, role, connected}|null, you, can_take}}
-       nav = {mode: 'goal'|'route'|None, state, goal: {x,y,yaw}|None, distance_remaining?,
+       nav = {mode: 'goal'|'route'|'approach'|None, state, goal: {x,y,yaw}|None, distance_remaining?,
+              target?, phase?: navigating|adjusting,
+              approach?: {phase, distance_error, lateral_error, angle_error, points, message?},
               route?: {id, name, total, current, phase: navigating|waiting|done,
                        wait_remaining?, reached, skipped: [...], stops: [{name,x,y,yaw,wait_s}]}}
     {"type": "map", ...}  {"type": "scan", ...}
@@ -56,10 +58,18 @@ WebSocket /ws (requiere sesión; se cierra con código 4401 si no la hay)
     {"type": "take_control"} / {"type": "release_control"}             rol >= operador
     {"type": "teleop", "vx", "vy", "wz"}                               requiere control
     {"type": "goal", "x", "y", "yaw"}                                  requiere control
+    {"type": "go_point", "point_id"}                                   requiere control
+        (punto de trabajo: navega y al llegar hace el ajuste fino frente a la pared)
+    {"type": "approach", "point_id"}                                   requiere control
+        (solo el ajuste fino; el robot ya debe estar delante de la pared)
     {"type": "cancel"}                                                 requiere control
     {"type": "run_route", "route_id"}                                  requiere control
     {"type": "arm_jog", "v": [7 x rad/s]}                              requiere control, a 10 Hz
-    {"type": "arm_move", "positions": [7 x rad]} | {"pose_id": N}      requiere control
+    {"type": "arm_move", "positions": [7 x rad]} | {"pose_id": N}, "speed"?   requiere control
+        (planificado con MoveIt; speed en cfg.MOVEIT_SPEEDS, por defecto MOVEIT_DEFAULT_SPEED)
+    {"type": "arm_screw", "point_id", "row", "col", "speed"?}         requiere control
+        (TCP delante del tornillo, a SCREW_STANDOFF de la pared; el robot debe
+         estar ajustado frente a ese punto de trabajo)
     {"type": "arm_cancel"}                                             requiere control
     {"type": "arm_mode", "mode": "jog"|"trajectory"}                   requiere control
     {"type": "stop"}                                                   cualquier usuario
@@ -899,8 +909,8 @@ def _num(msg, key, default=None):
         raise CommandRejected(f"'{key}' debe ser un número")
 
 
-NEEDS_CONTROL = ('teleop', 'goal', 'cancel', 'run_route',
-                 'arm_jog', 'arm_move', 'arm_cancel', 'arm_mode')
+NEEDS_CONTROL = ('teleop', 'goal', 'go_point', 'approach', 'cancel', 'run_route',
+                 'arm_jog', 'arm_move', 'arm_screw', 'arm_cancel', 'arm_mode')
 
 
 def handle_command(msg, client: Client):
@@ -929,6 +939,19 @@ def handle_command(msg, client: Client):
         bridge.teleop(_num(msg, 'vx', 0.0), _num(msg, 'vy', 0.0), _num(msg, 'wz', 0.0), who=who)
     elif kind == 'goal':
         bridge.send_goal(_num(msg, 'x'), _num(msg, 'y'), _num(msg, 'yaw', 0.0), who=who)
+    elif kind in ('go_point', 'approach'):
+        point = db.get_point(int(_num(msg, 'point_id')))
+        if point is None:
+            raise CommandRejected('ese punto no existe')
+        if point['map_name'] != cfg.MAP_NAME:
+            raise CommandRejected(f'el punto {point["name"]!r} es del mapa {point["map_name"]!r}, '
+                                  f'no del activo ({cfg.MAP_NAME!r})')
+        if kind == 'approach':
+            bridge.approach(point, who=who)
+        else:
+            work = point['work'] if point['kind'] == 'work' else None
+            bridge.send_goal(point['x'], point['y'], point['yaw'], who=who,
+                             work=work, name=point['name'], point_id=point['id'])
     elif kind == 'cancel':
         bridge.cancel_goal(who=who)
     elif kind == 'run_route':
@@ -949,9 +972,12 @@ def handle_command(msg, client: Client):
             pose = db.get_arm_pose(int(_num(msg, 'pose_id')))
             if pose is None:
                 raise CommandRejected('esa postura no existe')
-            bridge.arm.move_to(pose['positions'], who=who, label=pose['name'])
+            bridge.arm.move_to(pose['positions'], who=who, label=pose['name'], speed=msg.get('speed'))
         else:
-            bridge.arm.move_to(msg.get('positions'), who=who)
+            bridge.arm.move_to(msg.get('positions'), who=who, speed=msg.get('speed'))
+    elif kind == 'arm_screw':
+        bridge.arm_to_screw(int(_num(msg, 'point_id')), int(_num(msg, 'row')), int(_num(msg, 'col')),
+                            speed=msg.get('speed'), who=who)
     elif kind == 'arm_cancel':
         bridge.arm.cancel_move(who=who)
     elif kind == 'arm_mode':

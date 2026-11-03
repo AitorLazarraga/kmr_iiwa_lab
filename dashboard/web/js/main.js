@@ -159,6 +159,7 @@ function onState(s) {
 
   camera.setStatus(s.camera);
   arm.setState(s.arm);
+  arm.setWorkHere(s.work_here || null);
   map.setGoal(nav.goal ? { ...nav.goal, state: nav.state } : null);
   map.setRoute(route);
   points.setNav(nav);
@@ -171,10 +172,26 @@ function distText(nav) {
   return nav.distance_remaining != null ? `${nav.distance_remaining.toFixed(1)} m` : '';
 }
 
+const mm = (m) => `${m >= 0 ? '+' : ''}${Math.round(m * 1000)} mm`;
+const deg1 = (rad) => `${rad >= 0 ? '+' : ''}${(rad * 180 / Math.PI).toFixed(1)}°`;
+
+/** "corregir · d +12 mm · lat -4 mm · θ +0.8°" a partir de nav.approach. */
+function approachText(a) {
+  if (!a) return 'ajustando';
+  const phase = { iniciando: 'iniciando', medir: 'midiendo', corregir: 'corrigiendo', estable: 'estable',
+    hecho: 'hecho', fallido: 'FALLIDO' }[a.phase] || a.phase;
+  if (a.distance_error == null) return `ajuste · ${phase}`;
+  return `ajuste · ${phase} · d ${mm(a.distance_error)} · lat ${mm(a.lateral_error)} · θ ${deg1(a.angle_error)}`;
+}
+
 function routeStatusText(nav, route) {
-  if (!route) return distText(nav) || 'iniciando';
+  if (!route) {
+    if (nav.mode === 'approach' || nav.phase === 'adjusting') return approachText(nav.approach);
+    return distText(nav) || 'iniciando';
+  }
   const step = `${route.name} ${Math.min(route.current + 1, route.total)}/${route.total}`;
   if (route.phase === 'waiting') return `${step} · espera ${route.wait_remaining ?? ''}s`;
+  if (route.phase === 'adjusting') return `${step} · ${approachText(nav.approach)}`;
   return `${step} · ${distText(nav) || 'iniciando'}`;
 }
 
@@ -185,7 +202,22 @@ function goalInfoText(nav, route) {
     const skipped = route.skipped?.length ? ` · saltadas: ${route.skipped.join(', ')}` : '';
     const stateText = nav.state === 'succeeded' ? 'completada' : (NAV_TEXT[nav.state] || nav.state);
     return `Ruta ${route.name} · ${stateText}${where}` +
-      (route.phase === 'waiting' ? ` (esperando ${route.wait_remaining}s)` : '') + skipped;
+      (route.phase === 'waiting' ? ` (esperando ${route.wait_remaining}s)` : '') +
+      (route.phase === 'adjusting' ? ` · ${approachText(nav.approach)}` : '') + skipped;
+  }
+  if (nav.mode === 'approach' || nav.approach) {
+    const head = nav.mode === 'approach' ? 'Ajuste' : 'Ir';
+    const target = nav.target ? ` frente a ${nav.target}` : '';
+    if (['sending', 'active'].includes(nav.state)) {
+      return nav.phase === 'navigating'
+        ? `${head}${target} · navegando ${distText(nav)}`
+        : `${head}${target} · ${approachText(nav.approach)}`;
+    }
+    const msg = nav.approach?.message ? ` — ${nav.approach.message}` : '';
+    return `${head}${target} · ${NAV_TEXT[nav.state] || nav.state} · ${approachText(nav.approach)}${msg}`;
+  }
+  if (nav.goal && nav.target) {
+    return `Ir a ${nav.target} · ${NAV_TEXT[nav.state] || nav.state} ${distText(nav)}`;
   }
   if (nav.goal) {
     return `Goal x=${nav.goal.x.toFixed(2)} y=${nav.goal.y.toFixed(2)} ` +

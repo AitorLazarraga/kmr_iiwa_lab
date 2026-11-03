@@ -8,7 +8,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer,  TransformListener, TransformException
-from kuka_interfaces.action import ApproachWall
+from kuka_interfaces.action import ApproachWall, ShiftAlongWall
 from rclpy.qos import qos_profile_sensor_data
 import rclpy.time
 import numpy as np
@@ -48,6 +48,17 @@ class WallApproach(Node):
         self.max_reverse = self.declare_parameter('max_reverse', 0.03).value
         self.max_correction = self.declare_parameter('max_correction', 0.4).value
 
+
+        #Datos desplazamiento lateral
+        self.action_name_lat = '/kmr_iiwa/shift_along_wall'
+        self.max_lat_vel = 0.3 
+        self.max_lat_accel = 0.5
+        self.max_lat_mov = 1.0
+        self.tol_lat_d = 0.01
+        self.tol_lat_y = 0.0087
+        self.tol_lat_l = 0.01
+        self.odom = 'world'
+
         self.busy = False
 
         self.scan = None
@@ -60,12 +71,20 @@ class WallApproach(Node):
                            cancel_callback=self.on_cancel,
                            callback_group=self.cb)
 
+        self.lat_server = ActionServer(self, ShiftAlongWall, self.action_name_lat,
+                            execute_callback=self.lat_execute,
+                            goal_callback=self.lat_on_goal,
+                            cancel_callback=self.on_cancel,
+                            callback_group=self.cb)
+
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self.pub = self.create_publisher(TwistStamped, self.vel_topic, 10)
 
         self.sub = self.create_subscription(LaserScan, self.scan_topic, self.recibir_scan,qos_profile_sensor_data, callback_group=self.cb)
+
+
 
     def recibir_scan(self, msg):
         self.scan = msg
@@ -76,11 +95,116 @@ class WallApproach(Node):
             return self.make_result(ok, message)
         return self.make_result(ok, message, m['distance_error'], m['lateral_error'], m['angle_error'])
 
+    def lat_result_from(self, ok, message, m):
+            """Result con los errores de la última medida (o ceros si no hubo ninguna)."""
+            if m is None:
+                return self.make_lat_result(ok, message)
+            return self.make_lat_result(ok, message, m['distance_error'], m['lateral_error'], m['angle_error'], m['traveled'])
+
+    
+    def lat_execute(self, goal_handle):
+        self.busy = True
+        g = goal_handle.request
+        self.get_logger().info(
+                    f'Acercamiento: pared ({g.wall_p1.x:.2f}, {g.wall_p1.y:.2f}) -> '
+                    f'({g.wall_p2.x:.2f}, {g.wall_p2.y:.2f}), distancia {g.distance:.2f} m, lateral {g.lateral:.2f} m, shift {g.shift}')
+        rate = self.create_rate(self.rate)
+        start = self.get_clock().now()
+        feedback = ShiftAlongWall.Feedback()
+        pose = self.robot_pose(self.odom)
+        if pose is None:
+            self.busy = False
+            goal_handle.abort()
+            return self.make_lat_result(False, f'sin odometría ({self.odom} -> {self.base})')
+        x0, y0, yaw0 = pose
+        distance = abs(g.shift)
+        sign = 1.0 if g.shift > 0 else -1.0
+        #traveled = -sin(yaw0)*(x - x0) + cos(yaw0)*(y - y0)
+        traveled = 0
+        last = None
+        vy = 0.0
+        dt = 1 / self.rate
+        v_prev = 0.0
+        state = 'Accelerating'
+        try:
+            while rclpy.ok():
+                if goal_handle.is_cancel_requested:
+                    goal_handle.canceled()
+                    return self.make_lat_result(False, 'Cancelado por usuario', traveled=traveled)
+
+
+                elapsed = (self.get_clock().now() - start).nanoseconds / 1e9
+                if elapsed > self.timeout:
+                    goal_handle.abort()
+                    return self.make_lat_result(False, 'Timeout', traveled=traveled)
+
+
+                
+                pose = self.robot_pose(self.odom)
+                if pose is None:
+                    self.busy = False
+                    goal_handle.abort()
+                    return self.make_lat_result(False, f'sin odometría ({self.odom} -> {self.base})')
+                x, y, yaw = pose
+                traveled = -math.sin(yaw0)*(x - x0) + math.cos(yaw0)*(y - y0)
+                remaining = distance - sign * traveled
+
+                if remaining < -self.tol_lat_d:
+                    goal_handle.abort()
+                    return self.make_lat_result(False, 'Movimiento lateral fallido', traveled=traveled)
+
+                if remaining <= 0.002:
+                    for _ in range(int(0.3 * self.rate)):
+                        self.stop()
+                        rate.sleep()
+                    m = self.measure(g)
+
+                    if m is None:
+                        goal_handle.abort()
+                        return self.make_lat_result(False, 'Pared no visible en comprobacion', traveled=traveled)
+                    
+                    if abs(m['distance_error']) <= self.tol_lat_d and abs(m['angle_error']) <= self.tol_lat_y and abs(m['lateral_error']) <= self.tol_lat_l:
+                        m['traveled'] = traveled
+                        goal_handle.succeed()
+                        return self.lat_result_from(True, 'Posicionado frente a la pared de forma lateral', m)
+
+                    else:
+                        m['traveled'] = traveled
+                        goal_handle.abort()
+                        return self.lat_result_from(False, 'La comprobación final ha fallado', m)
+
+                v_acc = v_prev + self.max_lat_accel * dt
+                v_brake = math.sqrt(2 * self.max_lat_accel * remaining)
+                vy = min(v_acc, self.max_lat_vel, v_brake)
+                vy = max(vy, 0.01)
+
+                if vy == v_acc: state = 'accelerating'
+                if vy == self.max_lat_vel: state = 'cruising'
+                if vy == v_brake: state = 'braking'
+
+
+                self.publish_cmd(0, vy * sign, 0)    
+
+                
+                v_prev = vy
+
+                feedback.phase = state
+                feedback.traveled = traveled
+                feedback.speed = vy
+                goal_handle.publish_feedback(feedback)
+
+                rate.sleep()
+        finally:
+            self.busy = False
+            self.stop()
+            self.destroy_rate(rate)
+
+
     def execute(self, goal_handle):
         self.busy = True
         g = goal_handle.request
         self.get_logger().info(
-            f'Acercamiento: pared ({g.wall_p1.x:.2f}, {g.wall_p1.y:.2f}) -> '
+            f'Shift ({g.wall_p1.x:.2f}, {g.wall_p1.y:.2f}) -> '
             f'({g.wall_p2.x:.2f}, {g.wall_p2.y:.2f}), distancia {g.distance:.2f} m, lateral {g.lateral:.2f} m')
         rate = self.create_rate(self.rate)
         start = self.get_clock().now()
@@ -164,10 +288,10 @@ class WallApproach(Node):
 
         return vx, vy, wz, in_tol
     
-    def robot_pose(self):
-        """(x, y, yaw) de la base en el mapa según la localización, o None."""
+    def robot_pose(self, frame=None):
+        frame = frame or self.map
         try:
-            tf = self.tf_buffer.lookup_transform(self.map, self.base, rclpy.time.Time())
+            tf = self.tf_buffer.lookup_transform(frame, self.base, rclpy.time.Time())
         except TransformException:
             return None
         t = tf.transform.translation
@@ -305,6 +429,16 @@ class WallApproach(Node):
         res.final_angle_error = a
         return res
 
+    def make_lat_result(self, ok, message,d=0.0,l=0.0,a=0.0,traveled=0.0):
+            res = ShiftAlongWall.Result()
+            res.success = ok
+            res.message = message
+            res.final_distance_error = d
+            res.final_lateral_error = l
+            res.final_angle_error = a
+            res.traveled = traveled
+            return res
+
     def on_goal(self, goal):
         if self.busy:
             self.get_logger().warning('Meta rechazada: ya hay un acercamiento en curso')
@@ -320,6 +454,26 @@ class WallApproach(Node):
         if not 0.5 <= goal.distance <= 2.0:
             self.get_logger().warning(f'Meta rechazada: distancia {goal.distance:.2f} m fuera de [0.5, 2.0]')
             return GoalResponse.REJECT
+        return GoalResponse.ACCEPT
+
+
+    def lat_on_goal(self, goal):
+        if self.busy:
+            self.get_logger().warning('Meta Rechazada, ya hay otra meta en curso')
+            return GoalResponse.REJECT
+        nums = (goal.wall_p1.x, goal.wall_p1.y, goal.wall_p2.x, goal.wall_p2.y, goal.shift, goal.distance, goal.lateral)
+        if not all(math.isfinite(v) for v in nums):
+            self.get_logger().warning('Meta Rechazada, valores no finitos')
+            return GoalResponse.REJECT
+        if abs(goal.shift) > self.max_lat_mov:
+            self.get_logger().warning('Meta Rechazada, movimiento lateral superior al limite')
+            return GoalResponse.REJECT
+        if (abs(goal.shift) < 0.005):
+            self.get_logger().warning('Meta Rechazada, movimiento demasiado corto')
+            return GoalResponse.REJECT
+        #No valido el tamaño de la pared ni si el mov lateral es superior al tramo porque es un movimiento autonomo 
+        #dirigido por otra funcion interna, se presupone que no se enviaran datos superiores a los ya existentes
+
         return GoalResponse.ACCEPT
 
     def on_cancel(self, goal_handle):

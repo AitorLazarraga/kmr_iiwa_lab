@@ -200,6 +200,7 @@ body.no-control .no-control-note { display: block; }
   font-size: 12px; color: var(--muted); }
 .arm-status.moving { color: #a9c9ff; }
 .arm-status.bad { color: #ffb3b5; }
+.arm-status.ok { color: #9fe0b0; }
 .arm-joints { display: flex; flex-direction: column; gap: 6px; padding: 0 14px; }
 .aj-row { display: grid; grid-template-columns: 26px 40px 1fr 64px 40px; align-items: center; gap: 6px; }
 .aj-name { font-family: var(--mono); font-weight: 600; color: var(--muted); }
@@ -316,3 +317,15 @@ body.no-control .needs-control { opacity: .35; pointer-events: none; }
 .we-msg.warn { color: var(--warn); }
 .we-msg.bad { color: var(--danger); }
 .work-editor .re-buttons { flex-wrap: wrap; }
+
+/* ---------- Brazo con MoveIt (5.3) ---------- */
+.arm-moveit { margin: 0 14px; font-size: 12px; color: var(--muted); }
+.arm-moveit.ok::before { content: "● "; color: var(--ok); }
+.arm-moveit.bad { color: #ffb3b5; }
+.arm-moveit.bad::before { content: "● "; color: var(--danger); }
+.arm-screws { padding: 0 14px 10px; display: flex; flex-direction: column; gap: 6px; }
+.arm-screws-hint { color: var(--muted); font-size: 11px; }
+.screw-grid { display: grid; gap: 6px; }
+.screw-grid button { font-family: var(--mono); font-size: 12px; padding: 6px 4px; }
+.screw-grid button small { display: block; color: var(--muted); font-size: 10px; }
+.screw-grid button.target { background: var(--accent); color: #fff; border-color: var(--accent); }

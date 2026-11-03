@@ -137,6 +137,16 @@
           </div>
         </div>
 
+        <div class="speed">
+          <span>Velocidad MoveIt</span>
+          <div class="seg" role="group" aria-label="Velocidad de los movimientos planificados">
+            <button class="seg-btn" data-arm-plan-speed="0.1">10%</button>
+            <button class="seg-btn active" data-arm-plan-speed="0.25">25%</button>
+            <button class="seg-btn" data-arm-plan-speed="0.5">50%</button>
+          </div>
+        </div>
+        <div class="arm-moveit" id="arm-moveit">MoveIt: …</div>
+
         <div class="tcp-readout">
           <div class="tcp-title">TCP <small id="tcp-frame"></small></div>
           <div class="tcp-grid">
@@ -156,6 +166,15 @@
             <button class="ghost small danger-text needs-control hidden" id="btn-arm-cancel">Cancelar movimiento</button>
           </div>
           <ul class="pp-list" id="arm-poses-list"></ul>
+        </div>
+
+        <!-- Tornillos del punto de trabajo frente al que está ajustado el robot (5.3) -->
+        <div class="arm-screws hidden" id="arm-screws">
+          <div class="pp-actions">
+            <b class="poses-title" id="arm-screws-title">Tornillos</b>
+          </div>
+          <small class="arm-screws-hint">Lleva el TCP delante del tornillo, perpendicular a la pared. Vista desde el robot.</small>
+          <div class="screw-grid" id="screw-grid"></div>
         </div>
       </div>
     </section>

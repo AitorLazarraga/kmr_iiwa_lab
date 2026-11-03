@@ -1,0 +1,37 @@
+# Acercamiento fino a la pared (paso 6.4). Valores leídos por wall_approach.py
+wall_approach:
+  ros__parameters:
+    action_name: /kmr_iiwa/approach_wall
+    scan_topic: /kmr_iiwa/scan
+    cmd_vel_topic: /cmd_vel_smoothed      # entrada del collision monitor
+    map_frame: map
+    base_frame: kmp_base_link
+    rate: 20.0                            # Hz del bucle de control
+
+    # Tolerancias para dar el ajuste por terminado
+    tol_distance: 0.01                    # m
+    tol_lateral: 0.015                    # m
+    tol_angle: 0.0175                     # rad (1°)
+    stable_cycles: 10                     # ciclos seguidos dentro de tolerancia
+    timeout: 30.0                         # s
+
+    # Control
+    k_dist: 0.8
+    k_lat: 0.8
+    k_ang: 1.0
+    max_vx: 0.08                          # m/s
+    max_vy: 0.06                          # m/s
+    max_wz: 0.15                          # rad/s
+    max_reverse: 0.03                     # m/s hacia atrás (0 = nunca)
+    max_correction: 0.4                   # m: más error = abortar y renavegar
+
+    # Medida de la pared
+    window_band: 0.25                     # m alrededor de la pared esperada
+    inlier_tolerance: 0.02                # m (RANSAC)
+    ransac_iters: 60
+    min_wall_points: 20
+    lost_cycles: 10                       # ciclos sin pared antes de abortar
+
+    # Geometría del robot (iguales que en el gateway)
+    base_half: 0.54
+    arm_offset: -0.1842
