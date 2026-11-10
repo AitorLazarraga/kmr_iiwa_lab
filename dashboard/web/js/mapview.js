@@ -1,9 +1,10 @@
 // Vista 2D del mapa: mapa de ocupación, robot, scan, goal, puntos y rutas.
 // Coordenadas: todo en el frame "map" (metros, y hacia arriba).
 //
-// Herramientas: 'pan' (mover la vista), 'goal' y 'point' (pulsar y arrastrar
-// para orientar) y 'work' (arrastrar sobre la cara de una pared, de izquierda a
-// derecha vista desde donde se colocará el robot -> onWork([[x1,y1],[x2,y2]])).
+// Herramientas: 'pan' (mover la vista), 'goal', 'point' y 'pose' (pulsar y
+// arrastrar para orientar; 'pose' = «Fijar posición», dibuja la huella del
+// robot) y 'work' (arrastrar sobre la cara de una pared, de izquierda a derecha
+// vista desde donde se colocará el robot -> onWork([[x1,y1],[x2,y2]])).
 
 const ROBOT_LENGTH = 1.08;   // m (KMP 200)
 const ROBOT_WIDTH = 0.63;    // m
@@ -30,12 +31,14 @@ const COLORS = {
   workBad: '#e5484d',
 };
 const OCCUPIED = 65;          // umbral de celda ocupada (igual que el dibujo)
+const DRAG_TOOLS = ['goal', 'point', 'pose'];    // pulsar = posición, arrastrar = orientación
 
 export class MapView {
-  constructor(canvas, { onGoal, onPoint, onWork }) {
+  constructor(canvas, { onGoal, onPoint, onWork, onPose }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.onGoal = onGoal;
+    this.onPose = onPose;        // herramienta "Fijar posición" (/initialpose)
     this.onPoint = onPoint;      // herramienta "Punto de movimiento"
     this.onWork = onWork;        // herramienta "Punto de trabajo" (marcar pared)
     this.wallDraft = null;       // { p1, p2 } mientras se arrastra sobre la pared
@@ -192,7 +195,10 @@ export class MapView {
     if (this.workPreview) this._drawWorkPreview(this.workPreview);
     if (this.wallDraft) this._drawWallDraft(this.wallDraft);
     if (this.goal) this._drawGoal(this.goal, this._goalColor(this.goal.state));
-    if (this.preview) {
+    if (this.preview && this.tool === 'pose') {
+      const p = this.preview;
+      this._drawFootprint(p.x, p.y, p.yaw, COLORS.robot);
+    } else if (this.preview) {
       this._drawGoal(this.preview, this.tool === 'point' ? COLORS.pointPreview : COLORS.goalPreview);
     }
     this._drawRobot();
@@ -415,7 +421,7 @@ export class MapView {
     c.addEventListener('pointerdown', (e) => {
       c.setPointerCapture(e.pointerId);
       this.pointers.set(e.pointerId, pos(e));
-      if ((this.tool === 'goal' || this.tool === 'point') && this.pointers.size === 1) {
+      if (DRAG_TOOLS.includes(this.tool) && this.pointers.size === 1) {
         const [wx, wy] = this.toWorld(...pos(e));
         this.preview = { x: wx, y: wy, yaw: 0 };
         this.dirty = true;
@@ -447,7 +453,7 @@ export class MapView {
         this.dirty = true;
         return;
       }
-      if ((this.tool === 'goal' || this.tool === 'point') && this.preview) {  // arrastrar: orientación
+      if (DRAG_TOOLS.includes(this.tool) && this.preview) {        // arrastrar: orientación
         const [wx, wy] = this.toWorld(...now);
         const dx = wx - this.preview.x, dy = wy - this.preview.y;
         if (Math.hypot(dx, dy) * this.view.scale > 8) this.preview.yaw = Math.atan2(dy, dx);
@@ -462,11 +468,11 @@ export class MapView {
     const end = (e) => {
       if (!this.pointers.has(e.pointerId)) return;
       this.pointers.delete(e.pointerId);
-      if ((this.tool === 'goal' || this.tool === 'point') && this.preview && this.pointers.size === 0) {
+      if (DRAG_TOOLS.includes(this.tool) && this.preview && this.pointers.size === 0) {
         const g = this.preview;
         this.preview = null;
         this.dirty = true;
-        (this.tool === 'goal' ? this.onGoal : this.onPoint)(g);
+        ({ goal: this.onGoal, point: this.onPoint, pose: this.onPose })[this.tool]?.(g);
       } else if (this.tool === 'work' && this.wallDraft && this.pointers.size === 0) {
         const { p1, p2 } = this.wallDraft;
         this.wallDraft = null;

@@ -35,6 +35,12 @@ API HTTP
   DELETE /api/arm/poses/{id}    (operador)
   Los cambios emiten 'arm_poses_changed'.
 
+  Mapas (paso 2.6, cualquier usuario con sesión)
+  GET    /api/maps              {mode, active, start_cmd, dir_ok,
+                                 maps: [{name, modified, size, complete, image, active, points, routes}]}
+         Guardar el mapa y fijar la posición van por el WebSocket (map_save, set_pose).
+         Al guardar se emite 'maps_changed'.
+
   Cámara del brazo (cualquier usuario con sesión)
   GET    /api/camera/arm.mjpg   vídeo MJPEG (multipart/x-mixed-replace), para un <img>
   GET    /api/camera/arm.jpg    último fotograma
@@ -86,6 +92,11 @@ WebSocket /ws (requiere sesión; se cierra con código 4401 si no la hay)
     {"type": "arm_correct"}                                            requiere control
         (corrección corta del TCP con Servo hacia el tornillo en el que está la herramienta)
     {"type": "arm_mode", "mode": "jog"|"trajectory"}                   requiere control
+    {"type": "set_pose", "x", "y", "yaw"}                              requiere control
+        (paso 2.6, modo localización: /initialpose para relocalizar; base parada)
+    {"type": "map_save", "name", "overwrite"?}                         requiere control
+        (paso 2.6, modo mapeo: slam_toolbox guarda el mapa en MAPS_DIR; sobrescribir
+         uno existente solo un administrador, con overwrite=true)
     {"type": "stop"}                                                   cualquier usuario
 
 Ejecución:
@@ -832,6 +843,21 @@ async def arm_poses_delete(pose_id: int, user=Depends(operator_user)):
 
 
 # ---------------------------------------------------------------- cámara
+# ---------------------------------------------------------------- mapas (2.6)
+@app.get('/api/maps')
+async def list_maps(user=Depends(current_user)):
+    """Mapas guardados en MAPS_DIR, con los puntos y rutas que tiene cada uno.
+    El gateway no cambia de mapa: el dashboard muestra el comando de arranque."""
+    maps = await asyncio.to_thread(bridge.maps.list_maps)
+    out = []
+    for m in maps or []:
+        out.append({**m, 'active': m['name'] == cfg.MAP_NAME,
+                    'points': len(db.list_points(m['name'])),
+                    'routes': len(db.list_routes(m['name']))})
+    return {'mode': cfg.SLAM_MODE, 'active': cfg.MAP_NAME, 'start_cmd': cfg.START_CMD,
+            'dir_ok': maps is not None, 'maps': out}
+
+
 @app.get('/api/camera/arm.jpg')
 async def camera_snapshot(user=Depends(current_user)):
     _, jpeg = await asyncio.to_thread(bridge.get_camera_jpeg)
@@ -945,12 +971,13 @@ def _num(msg, key, default=None):
 
 NEEDS_CONTROL = ('teleop', 'goal', 'go_point', 'approach', 'shift', 'arm_lin', 'cancel', 'run_route',
                  'seq_start', 'seq_pause', 'seq_resume', 'seq_cancel',
-                 'arm_jog', 'arm_move', 'arm_screw', 'arm_cancel', 'arm_mode', 'arm_cart', 'arm_correct')
+                 'arm_jog', 'arm_move', 'arm_screw', 'arm_cancel', 'arm_mode', 'arm_cart', 'arm_correct',
+                 'set_pose', 'map_save')
 
 
 # Órdenes manuales que no se aceptan mientras la secuencia está en marcha (sí en pausa)
 SEQ_BLOCKS = ('teleop', 'goal', 'go_point', 'approach', 'shift', 'run_route', 'arm_jog', 'arm_move',
-              'arm_screw', 'arm_lin', 'arm_cart', 'arm_correct', 'arm_mode')
+              'arm_screw', 'arm_lin', 'arm_cart', 'arm_correct', 'arm_mode', 'set_pose')
 
 
 def _is_zero(kind, msg):
@@ -1058,6 +1085,11 @@ def handle_command(msg, client: Client):
         bridge.arm_correct(who=who)
     elif kind == 'arm_mode':
         bridge.arm.set_mode(str(msg.get('mode')), who=who)
+    elif kind == 'set_pose':
+        bridge.set_initial_pose(_num(msg, 'x'), _num(msg, 'y'), _num(msg, 'yaw', 0.0), who=who)
+    elif kind == 'map_save':
+        bridge.maps.save(msg.get('name'), overwrite=msg.get('overwrite') is True,
+                         role=client.role, who=who)
     else:
         raise CommandRejected(f'tipo de mensaje desconocido: {kind!r}')
 

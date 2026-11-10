@@ -5,6 +5,7 @@ import { api } from './api.js';
 import { ArmPanel } from './arm.js';
 import { ArmCamera } from './camera.js';
 import { Connection } from './connection.js';
+import { MapsPanel } from './maps.js';
 import { MapView } from './mapview.js';
 import { PointsPanel } from './points.js';
 import { Teleop } from './teleop.js';
@@ -41,6 +42,7 @@ function startSession(user) {
   conn.start();
   points.reload();
   arm.reloadPoses();
+  maps.reload();
   camera.start();
 }
 
@@ -69,7 +71,10 @@ const conn = new Connection({
     setDot('st-client', connected ? 'on' : 'off');
     alerts.condition('ws_lost', !connected && me !== null, 'emergency',
       'SIN CONEXIÓN con el gateway: el robot no recibe órdenes de este panel');
-    if (connected) { alerts.push('info', 'Conectado al gateway'); points.reload(); arm.reloadPoses(); }
+    if (connected) {
+      alerts.push('info', 'Conectado al gateway');
+      points.reload(); arm.reloadPoses(); maps.reload();
+    }
     else { setDot('st-ros', ''); setControl(false); }
   },
   onAuthLost: () => {
@@ -80,7 +85,7 @@ const conn = new Connection({
 });
 
 const handlers = {
-  config: (msg) => { teleop.setLimits(msg.limits); arm.setConfig(msg.arm); },
+  config: (msg) => { teleop.setLimits(msg.limits); arm.setConfig(msg.arm); setSlamMode(msg.slam); },
   state: (msg) => onState(msg),
   map: (msg) => { map.setMap(msg); $('map-hint').classList.add('hidden'); },
   scan: (msg) => map.setScan(msg),
@@ -88,6 +93,7 @@ const handlers = {
     alerts.push(msg.level, msg.message, msg.time);
     if (msg.code === 'points_changed') points.reload();
     if (msg.code === 'arm_poses_changed') arm.reloadPoses();
+    if (msg.code === 'maps_changed') maps.reload();
   },
   notice: (msg) => alerts.push(msg.level, msg.message),
   error: (msg) => alerts.push('warning', msg.message),
@@ -103,7 +109,31 @@ const map = new MapView($('map'), {
   },
   onPoint: (g) => points.createPoint(g.x, g.y, g.yaw),
   onWork: (wall) => points.onWall(wall),
+  onPose: (g) => {
+    selectTool('pan');                          // una sola vez: no repetir sin querer
+    if (!hasControl) { alerts.push('warning', 'Necesitas el control para fijar la posición'); return; }
+    if (!conn.send({ type: 'set_pose', x: g.x, y: g.y, yaw: g.yaw })) {
+      alerts.push('warning', 'Sin conexión: la posición no se ha enviado');
+    }
+  },
 });
+
+const maps = new MapsPanel({
+  send: (msg) => conn.send(msg),
+  notify: (level, text) => alerts.push(level, text),
+  getRole: () => me?.role,
+});
+
+/** Modo de slam_toolbox: «Fijar posición» solo en localización. */
+function setSlamMode(slam) {
+  const btn = $('tool-pose');
+  const loc = !slam || slam.mode === 'localization';
+  btn.disabled = !loc;
+  btn.title = loc
+    ? 'Fijar posición: pulsar donde está el robot de verdad y arrastrar para orientar'
+    : 'En modo mapeo slam_toolbox no usa la posición fijada a mano';
+  if (!loc && map.tool === 'pose') selectTool('pan');
+}
 
 const points = new PointsPanel({
   map,
@@ -163,6 +193,7 @@ function onState(s) {
   arm.setWorkHere(s.work_here || null);
   arm.setSafePose(s.safe_pose || null);
   arm.setSequence(s.sequence || null);
+  maps.setSlam(s.slam || null);
   map.setGoal(nav.goal ? { ...nav.goal, state: nav.state } : null);
   map.setRoute(route);
   points.setNav(nav);
@@ -335,13 +366,16 @@ function selectTool(tool) {
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === tool));
   map.setTool(tool);
   const panel = document.querySelector('.map-panel');
-  panel.classList.toggle('tool-goal', tool === 'goal' || tool === 'point');
+  panel.classList.toggle('tool-goal', tool === 'goal' || tool === 'point' || tool === 'pose');
   panel.classList.toggle('tool-work', tool === 'work');
   $('map-tip').classList.toggle('hidden', tool !== 'work');
+  $('map-tip-pose').classList.toggle('hidden', tool !== 'pose');
 }
 document.querySelectorAll('[data-tool]').forEach((btn) => {
   btn.addEventListener('click', () => selectTool(btn.dataset.tool));
 });
+// La lista de mapas se refresca al abrir su pestaña (pueden haberse copiado ficheros a mano)
+document.querySelector('[data-pp-tab="maps"]').addEventListener('click', () => maps.reload());
 
 document.querySelectorAll('[data-speed]').forEach((btn) => {
   btn.addEventListener('click', () => {

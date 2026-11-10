@@ -53,6 +53,7 @@
           <button class="seg-btn" data-tool="goal" title="Pulsar y arrastrar para orientar">Poner goal</button>
           <button class="seg-btn needs-operator" data-tool="point" title="Punto de movimiento: pulsar y arrastrar para orientar; pide un nombre">Punto mov.</button>
           <button class="seg-btn needs-operator" data-tool="work" title="Punto de trabajo: arrastrar sobre la cara de una pared, de izquierda a derecha vista desde donde quedará el robot">Punto trabajo</button>
+          <button class="seg-btn needs-control" data-tool="pose" id="tool-pose" title="Fijar posición: pulsar donde está el robot de verdad y arrastrar para orientar (modo localización)">Fijar posición</button>
         </div>
         <button class="ghost" id="btn-camera" title="Mostrar la cámara del brazo">Cámara</button>
         <button class="ghost" id="btn-center">Centrar robot</button>
@@ -62,6 +63,7 @@
       <div class="map-wrap">
         <canvas id="map"></canvas>
         <div class="map-hint" id="map-hint">Esperando mapa…</div>
+        <div class="map-tip hidden" id="map-tip-pose">Pulsa donde está el robot <b>de verdad</b> y arrastra hacia donde mira su <b>frontal</b></div>
         <div class="map-tip hidden" id="map-tip">Arrastra sobre la <b>cara de la pared</b> de <b>izquierda a derecha</b>, vista desde donde quedará el robot</div>
         <div class="cam-box hidden" id="cam-box">
           <img id="cam-img" alt="Cámara del brazo">
@@ -122,11 +124,13 @@
         <kbd>Q</kbd>/<kbd>E</kbd> girar · <kbd>Espacio</kbd> parada</p>
       </div>
 
-      <!-- Brazo -->
+      <!-- Brazo: cabecera siempre visible + secciones plegables (2.6). Cada
+           navegador recuerda qué secciones dejó abiertas; por defecto solo las de jog. -->
       <div class="tp-body hidden" id="tp-arm">
-        <div class="arm-status" id="arm-status">Sin datos del brazo</div>
-
-        <div class="arm-joints" id="arm-joints"></div>
+        <div class="arm-top">
+          <div class="arm-status" id="arm-status">Sin datos del brazo</div>
+          <button class="ghost small danger-text needs-control hidden" id="btn-arm-cancel">Cancelar movimiento</button>
+        </div>
 
         <div class="speed">
           <span>Velocidad jog</span>
@@ -145,46 +149,58 @@
             <button class="seg-btn" data-arm-plan-speed="0.5">50%</button>
           </div>
         </div>
-        <div class="arm-cart">
-          <div class="arm-cart-head">
-            <span>Jog cartesiano (Servo)</span>
-            <div class="seg" role="group" aria-label="Frame del jog cartesiano">
-              <button class="seg-btn active" data-cart-frame="tool" title="Ejes de la herramienta: Z hacia la pared">Herramienta</button>
-              <button class="seg-btn" data-cart-frame="base" title="Ejes fijos de la base del brazo (link_0)">Base brazo</button>
-            </div>
-          </div>
-          <div class="arm-cart-grid" id="arm-cart"></div>
-          <div class="arm-moveit" id="arm-servo">Servo: …</div>
-        </div>
         <div class="arm-moveit" id="arm-moveit">MoveIt: …</div>
         <div class="arm-moveit" id="arm-safe"></div>
 
-        <div class="tcp-readout">
-          <div class="tcp-title">TCP <small id="tcp-frame"></small></div>
-          <div class="tcp-grid">
-            <div><span>X</span><b id="tcp-x">—</b><small>mm</small></div>
-            <div><span>Y</span><b id="tcp-y">—</b><small>mm</small></div>
-            <div><span>Z</span><b id="tcp-z">—</b><small>mm</small></div>
-            <div><span>Roll</span><b id="tcp-r">—</b><small>°</small></div>
-            <div><span>Pitch</span><b id="tcp-p">—</b><small>°</small></div>
-            <div><span>Yaw</span><b id="tcp-yw">—</b><small>°</small></div>
-          </div>
-        </div>
+        <details class="arm-sec" data-sec="jog" open>
+          <summary>Jog articular</summary>
+          <div class="arm-joints" id="arm-joints"></div>
+        </details>
 
-        <div class="arm-poses">
-          <div class="pp-actions">
-            <b class="poses-title">Posturas</b>
-            <button class="ghost small needs-operator" id="btn-save-arm-pose">+ Guardar actual</button>
-            <button class="ghost small danger-text needs-control hidden" id="btn-arm-cancel">Cancelar movimiento</button>
+        <details class="arm-sec" data-sec="cart" open>
+          <summary>Jog cartesiano (Servo)</summary>
+          <div class="arm-cart">
+            <div class="arm-cart-head">
+              <span>Ejes</span>
+              <div class="seg" role="group" aria-label="Frame del jog cartesiano">
+                <button class="seg-btn active" data-cart-frame="tool" title="Ejes de la herramienta: Z hacia la pared">Herramienta</button>
+                <button class="seg-btn" data-cart-frame="base" title="Ejes fijos de la base del brazo (link_0)">Base brazo</button>
+              </div>
+            </div>
+            <div class="arm-cart-grid" id="arm-cart"></div>
+            <div class="arm-moveit" id="arm-servo">Servo: …</div>
           </div>
-          <ul class="pp-list" id="arm-poses-list"></ul>
-        </div>
+        </details>
 
-        <!-- Tornillos del punto de trabajo frente al que está ajustado el robot (5.3) -->
-        <div class="arm-screws hidden" id="arm-screws">
-          <div class="pp-actions">
-            <b class="poses-title" id="arm-screws-title">Tornillos</b>
+        <details class="arm-sec" data-sec="tcp">
+          <summary>TCP <small id="tcp-frame"></small></summary>
+          <div class="tcp-readout">
+            <div class="tcp-grid">
+              <div><span>X</span><b id="tcp-x">—</b><small>mm</small></div>
+              <div><span>Y</span><b id="tcp-y">—</b><small>mm</small></div>
+              <div><span>Z</span><b id="tcp-z">—</b><small>mm</small></div>
+              <div><span>Roll</span><b id="tcp-r">—</b><small>°</small></div>
+              <div><span>Pitch</span><b id="tcp-p">—</b><small>°</small></div>
+              <div><span>Yaw</span><b id="tcp-yw">—</b><small>°</small></div>
+            </div>
           </div>
+        </details>
+
+        <details class="arm-sec" data-sec="poses">
+          <summary>Posturas</summary>
+          <div class="arm-poses">
+            <div class="pp-actions">
+              <button class="ghost small needs-operator" id="btn-save-arm-pose">+ Guardar actual</button>
+            </div>
+            <ul class="pp-list" id="arm-poses-list"></ul>
+          </div>
+        </details>
+
+        <!-- Tornillos del punto de trabajo frente al que está ajustado el robot (5.3).
+             Se abre sola al quedar ajustado frente a un punto y al empezar una secuencia. -->
+        <details class="arm-sec hidden" data-sec="screws" id="arm-screws">
+          <summary id="arm-screws-title">Tornillos</summary>
+          <div class="arm-screws">
           <small class="arm-screws-hint">Lleva el TCP delante del tornillo, perpendicular a la pared. Vista desde el robot.</small>
           <div class="arm-seq" id="arm-seq">
             <div class="arm-seq-btns">
@@ -206,7 +222,8 @@
           <div class="screw-grid screw-cols" id="screw-cols"></div>
           <small class="arm-screws-est" id="arm-screws-ref"></small>
           <small class="arm-screws-est" id="arm-screws-est"></small>
-        </div>
+          </div>
+        </details>
       </div>
     </section>
 
@@ -216,6 +233,7 @@
         <div class="seg" role="tablist">
           <button class="seg-btn active" data-pp-tab="points">Puntos</button>
           <button class="seg-btn" data-pp-tab="routes">Rutas</button>
+          <button class="seg-btn" data-pp-tab="maps">Mapas</button>
         </div>
       </div>
 
@@ -269,6 +287,36 @@
             <button class="ghost" id="re-cancel">Cancelar</button>
           </div>
         </div>
+      </div>
+
+      <!-- Mapas (2.6): guardar el mapa en modo mapeo y elegir con cuál arrancar -->
+      <div class="pp-body hidden" id="pp-maps">
+        <div class="mp-status" id="mp-status">—</div>
+
+        <div class="mp-save hidden" id="mp-save">
+          <div class="re-title">Guardar el mapa que se está construyendo</div>
+          <div class="mp-save-row">
+            <input id="mp-name" placeholder="nombre-del-mapa" maxlength="40" autocomplete="off"
+                   autocapitalize="off" spellcheck="false">
+            <button class="primary needs-control" id="mp-save-btn">Guardar mapa</button>
+          </div>
+          <small class="mp-hint">Minúsculas, números, «-» y «_». Lo guarda slam_toolbox en la carpeta de mapas.</small>
+          <div class="mp-msg" id="mp-msg"></div>
+        </div>
+
+        <div class="re-title">Mapas guardados</div>
+        <ul class="pp-list" id="maps-list"></ul>
+
+        <div class="mp-cmd hidden" id="mp-cmd">
+          <div class="mp-cmd-title" id="mp-cmd-title"></div>
+          <div class="mp-cmd-row">
+            <code id="mp-cmd-text"></code>
+            <button class="ghost small" id="mp-copy">Copiar</button>
+          </div>
+          <small class="mp-hint">En el PC del robot, desde la carpeta de Docker. Reinicia Gazebo y los
+            contenedores: todos los dashboards se desconectarán un momento.</small>
+        </div>
+        <small class="mp-hint" id="mp-new"></small>
       </div>
     </section>
     </div>

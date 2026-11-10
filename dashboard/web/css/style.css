@@ -361,3 +361,50 @@ body.no-control .needs-control { opacity: .35; pointer-events: none; }
 .arm-tool span.adv { color: #ffd88a; }
 .screw-grid button.tool-adv { background: rgba(240, 180, 41, .22); border-color: #f0b429; }
 .arm-screws-est { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+
+/* ---------- Secciones plegables del brazo (2.6) ---------- */
+.arm-top { display: flex; align-items: center; gap: 6px; margin: 0 14px; }
+.arm-top .arm-status { flex: 1; margin: 0; }
+.arm-sec { margin: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: #ffffff05; }
+.arm-sec > summary { list-style: none; cursor: pointer; user-select: none; display: flex; align-items: center;
+  gap: 8px; padding: 7px 10px; font-size: 12px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--muted); }
+.arm-sec > summary::-webkit-details-marker { display: none; }
+.arm-sec > summary::before { content: "▸"; font-size: 11px; transition: transform .15s; }
+.arm-sec[open] > summary::before { transform: rotate(90deg); }
+.arm-sec > summary:hover { color: var(--text); }
+.arm-sec > summary small { text-transform: none; letter-spacing: 0; font-weight: 400; font-family: var(--mono); }
+.arm-sec[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.arm-sec .arm-joints, .arm-sec .arm-poses, .arm-sec .arm-screws { padding-left: 6px; padding-right: 6px; }
+.arm-sec .arm-joints, .arm-sec .arm-poses { padding-bottom: 8px; }
+.arm-sec .arm-cart { margin: 0 6px 8px; }
+.arm-sec .tcp-readout { margin: 0 6px 8px; }
+#arm-screws > summary { color: #4fd1a5; }
+
+/* ---------- Fijar posición y mapas (2.6) ---------- */
+.seg-btn:disabled { opacity: .35; cursor: not-allowed; }
+.mp-status { font-size: 13px; padding: 6px 8px; border-radius: 8px; background: var(--panel-2); }
+.mp-status small { color: var(--muted); }
+.mp-status.mapping { box-shadow: inset 3px 0 0 var(--warn); }
+.mp-save { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line);
+  border-radius: 8px; }
+.mp-save-row { display: flex; gap: 6px; }
+.mp-save-row input { flex: 1; min-width: 0; font: inherit; font-family: var(--mono); color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+.mp-save-row input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.mp-save-row .primary { padding: 8px 12px; }
+.mp-hint { color: var(--muted); font-size: 11px; }
+.mp-hint code, .mp-cmd code { font-family: var(--mono); }
+.mp-msg { font-size: 12px; color: var(--muted); min-height: 1.2em; }
+.mp-msg.run { color: #9fc6ff; }
+.mp-msg.ok { color: #9be6bd; }
+.mp-msg.bad { color: #ff9b9b; }
+.mp-item { cursor: pointer; }
+.mp-item.selected { border-color: var(--accent); background: #3d8bfd14; }
+.mp-tag { font-size: 10px; font-weight: 600; color: #9be6bd; border: 1px solid #2fbf7166; border-radius: 999px;
+  padding: 0 6px; vertical-align: 1px; }
+.mp-cmd { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 8px; background: var(--panel-2); }
+.mp-cmd-title { font-size: 12px; }
+.mp-cmd-row { display: flex; align-items: center; gap: 6px; }
+.mp-cmd-row code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; padding: 6px 8px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; user-select: all; }

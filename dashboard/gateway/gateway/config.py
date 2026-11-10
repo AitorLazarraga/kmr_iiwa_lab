@@ -50,6 +50,26 @@ BASE_FRAME = _env('BASE_FRAME', 'kmp_base_link')
 # pertenecen a un mapa: si se carga otro mapa en Nav2, lanzar con MAP_NAME=otro.
 MAP_NAME = _env('MAP_NAME', 'laboratorio')
 
+# --- Mapas (paso 2.6) ---------------------------------------------------------
+# Modo en el que se ha lanzado slam_toolbox (start_sim.sh lo pasa como MODE):
+#   'mapping'      -> se puede guardar el mapa que se está construyendo
+#   'localization' -> se puede fijar la posición inicial (/initialpose)
+SLAM_MODE = _env('SLAM_MODE', 'localization')
+# Carpeta de los mapas VISTA POR slam_toolbox (es quien escribe los ficheros al
+# guardar) y por el gateway (la lee para listar los mapas). En Docker es /maps
+# en los dos contenedores; en nativo, la carpeta maps del paquete kuka_nav.
+MAPS_DIR = _env('MAPS_DIR', '/maps')
+SLAM_SERIALIZE_SERVICE = _env('SLAM_SERIALIZE_SERVICE', '/slam_toolbox/serialize_map')  # .posegraph + .data
+SLAM_SAVE_MAP_SERVICE = _env('SLAM_SAVE_MAP_SERVICE', '/slam_toolbox/save_map')         # .pgm + .yaml
+INITIAL_POSE_TOPIC = _env('INITIAL_POSE_TOPIC', '/initialpose')
+MAP_SAVE_TIMEOUT = 60.0         # s por servicio (serializar 20 MB tarda unos segundos)
+# Incertidumbre de la posición fijada a mano (varianzas, como «2D Pose Estimate» de RViz)
+INITIAL_POSE_VAR_XY = 0.25      # m²
+INITIAL_POSE_VAR_YAW = 0.0685   # rad² (≈ 15°)
+# Comando para arrancar con otro mapa (lo muestra el selector de mapas del dashboard;
+# el gateway no reinicia nada: no tiene acceso a Docker)
+START_CMD = _env('START_CMD', './start_sim.sh')
+
 # Qué hacer si una parada de una ruta no se alcanza:
 #   'stop' -> la ruta se detiene ahí (recomendado para atornillar: no seguir
 #             si algo ha fallado)

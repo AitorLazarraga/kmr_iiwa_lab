@@ -81,6 +81,7 @@ from . import planner as plannerlib
 from . import work as workgeo
 from .servo import ServoController
 from .sequencer import Sequencer
+from .maps import MapManager
 from .arm import ArmController
 from .errors import CommandRejected  # noqa: F401  (main.py la importa desde aquí)
 
@@ -194,6 +195,7 @@ class RosBridge(Node):
         self.arm = ArmController(self, cfg)
         self.arm.servo = ServoController(self, cfg, self.arm)
         self.seq = Sequencer(self, cfg)
+        self.maps = MapManager(self, cfg)
 
         log.info('Nodo ROS listo. Teleop -> %s, límites vx=[%.2f, %.2f] vy=±%.2f '
                  'wz=±%.2f, watchdog=%.2fs', cfg.TELEOP_TOPIC, cfg.MIN_VX,
@@ -381,7 +383,8 @@ class RosBridge(Node):
                 'arm': {**self.arm.get_state(), 'servo': self.arm.servo.get_state()},
                 'work_here': self._work_here_state(),
                 'safe_pose': self._safe_pose_state(),
-                'sequence': self.seq.get_state()}
+                'sequence': self.seq.get_state(),
+                'slam': self.maps.get_state()}
 
     def _safe_pose_state(self):
         pose = self.safe_pose()
@@ -535,7 +538,8 @@ class RosBridge(Node):
                 'watchdog_timeout': c.WATCHDOG_TIMEOUT,
                 'arm': {'joints': c.ARM_JOINTS,
                         'jog_max_vel': c.ARM_JOG_MAX_VEL,
-                        'watchdog_timeout': c.ARM_WATCHDOG_TIMEOUT}}
+                        'watchdog_timeout': c.ARM_WATCHDOG_TIMEOUT},
+                'slam': {'mode': c.SLAM_MODE, 'map': c.MAP_NAME, 'start_cmd': c.START_CMD}}
 
     def get_map(self):
         with self._lock:
@@ -1517,6 +1521,33 @@ class RosBridge(Node):
             self._work_here = None
         self.arm.planner.clear_wall()          # la volverá a poner el ajuste si sale bien
         self._approach(job, w['work'], lateral=u, distance=w.get('distance_goal'))
+
+    # ------------------------------------------------------------- mapas (2.6)
+    def set_initial_pose(self, x, y, yaw, who='?'):
+        """«Fijar posición»: le dice a slam_toolbox (modo localización) dónde está
+        el robot. Solo con la base parada: sin navegación ni teleoperación (la
+        secuencia de atornillado ya la bloquea main.py). No toca el punto de
+        trabajo actual: su posición respecto a la pared la midió el lidar y no
+        depende de dónde crea el mapa que está el robot."""
+        self._check_pose_args(who, x, y, yaw)
+        if self.cfg.SLAM_MODE != 'localization':
+            self._reject(who, 'la posición solo se fija en modo localización '
+                              '(en mapeo, slam_toolbox no la usa)')
+        if self.nav_running():
+            self._reject(who, 'hay una navegación en curso: cancélala antes de fijar la posición')
+        if self._teleop_active:
+            self._reject(who, 'la base se está moviendo (teleoperación)')
+        with self._lock:
+            m = self._map
+        if m is not None:
+            x0, y0 = m['origin']['x'], m['origin']['y']
+            if not (x0 <= x <= x0 + m['width'] * m['resolution']
+                    and y0 <= y <= y0 + m['height'] * m['resolution']):
+                self._reject(who, 'esa posición está fuera del mapa')
+        self.maps.publish_initial_pose(x, y, yaw)
+        log.info('POSICIÓN fijada por %s: x=%.2f y=%.2f yaw=%.1f°', who, x, y, math.degrees(yaw))
+        self._emit('info', 'initial_pose',
+                   f'Posición fijada por {who}: x={x:.2f} y={y:.2f} θ={math.degrees(yaw):.0f}°')
 
     def nav_running(self):
         with self._lock:

@@ -21,6 +21,11 @@ const MODE_TEXT = { jog: 'jog', trajectory: 'trayectoria', switching: 'cambiando
 const MOVE_TEXT = { pending: 'preparando', sending: 'enviando', planning: 'planificando', active: 'moviendo',
   succeeded: 'alcanzada', aborted: 'FALLIDO', canceled: 'cancelado', rejected: 'RECHAZADO' };
 const RUNNING = ['pending', 'sending', 'planning', 'active'];
+// Secciones plegables del panel (2.6). Cada navegador recuerda cómo las dejó;
+// sin nada guardado, solo las de jog abiertas. «Tornillos» se abre sola al
+// quedar el robot ajustado frente a un punto de trabajo y al empezar una secuencia.
+const SECTIONS_KEY = 'kmr.arm.sections';
+const SECTIONS_DEFAULT = { jog: true, cart: true, tcp: false, poses: false, screws: false };
 
 // Resultado de check_tcp_orientation (move.check)
 function checkText(c) {
@@ -51,9 +56,40 @@ export class ArmPanel {
     this.safeName = 'reposo';       // nombre de la postura de reposo (state.safe_pose.name)
     this._safeKey = null;
 
+    this._workPointId = null;       // para abrir «Tornillos» al llegar a un punto nuevo
+    this._seqRunning = false;
+
     this._buildRows();
     this._buildCart();
+    this._initSections();
     this._bind();
+  }
+
+  // ------------------------------------------------------------ secciones plegables
+  _initSections() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(SECTIONS_KEY) || '{}') || {}; } catch { saved = {}; }
+    this.sections = {};
+    document.querySelectorAll('details.arm-sec').forEach((d) => {
+      const k = d.dataset.sec;
+      this.sections[k] = d;
+      d.open = k in saved ? !!saved[k] : !!SECTIONS_DEFAULT[k];
+      d.addEventListener('toggle', () => {
+        if (!d.open && (k === 'jog' || k === 'cart')) this._release();   // nada pulsado oculto
+        this._saveSections();
+      });
+    });
+  }
+
+  _saveSections() {
+    const st = {};
+    for (const [k, d] of Object.entries(this.sections)) st[k] = d.open;
+    try { localStorage.setItem(SECTIONS_KEY, JSON.stringify(st)); } catch { /* sin almacenamiento */ }
+  }
+
+  openSection(k) {
+    const d = this.sections[k];
+    if (d && !d.open) d.open = true;
   }
 
   // ------------------------------------------------------------ datos
@@ -298,6 +334,9 @@ export class ArmPanel {
     this._workKey = key;
     this.workHere = w;
     this.$('arm-screws').classList.toggle('hidden', !w);
+    const pid = w ? w.point_id : null;
+    if (pid !== null && pid !== this._workPointId) this.openSection('screws');   // recién ajustado
+    this._workPointId = pid;
     const grid = this.$('screw-grid');
     const colsEl = this.$('screw-cols');
     grid.replaceChildren();
@@ -391,6 +430,8 @@ export class ArmPanel {
     const st = sq?.state || 'idle';
     const here = this.workHere && sq && sq.point_id === this.workHere.point_id;
     const running = ['running', 'pausing', 'canceling'].includes(st);
+    if (running && !this._seqRunning) this.openSection('screws');
+    this._seqRunning = running;
     // Mientras corre, los botones manuales del panel no hacen nada (el gateway los rechazaría)
     this.$('arm-screws').classList.toggle('seq-running', running);
     document.querySelector('.arm-cart')?.classList.toggle('seq-running', running);

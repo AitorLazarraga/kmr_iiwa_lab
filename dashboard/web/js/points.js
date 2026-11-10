@@ -398,8 +398,8 @@ export class PointsPanel {
   _showTab(tab) {
     document.querySelectorAll('[data-pp-tab]').forEach((b) =>
       b.classList.toggle('active', b.dataset.ppTab === tab));
-    this.$('pp-points').classList.toggle('hidden', tab !== 'points');
-    this.$('pp-routes').classList.toggle('hidden', tab !== 'routes');
+    document.querySelectorAll('[data-pp-tab]').forEach((b) =>
+      this.$(`pp-${b.dataset.ppTab}`).classList.toggle('hidden', b.dataset.ppTab !== tab));
   }
 
   _bind() {
