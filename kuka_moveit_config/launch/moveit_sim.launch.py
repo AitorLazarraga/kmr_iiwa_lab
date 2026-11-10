@@ -30,9 +30,11 @@ from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from moveit_configs_utils import MoveItConfigsBuilder
+from launch_param_builder import ParameterBuilder
 
 NAMESPACE = 'kmr_iiwa'
 
+servo_params = {'moveit_servo': ParameterBuilder('kuka_moveit_config').yaml('config/servo.yaml').to_dict()}
 
 def generate_launch_description():
     kuka_lab = get_package_share_directory('kuka_lab')
@@ -72,7 +74,23 @@ def generate_launch_description():
         output='screen',
         parameters=[moveit_config.to_dict(), sim_time],
     )
-
+    
+    servo = Node(
+        package='moveit_servo',
+        executable='servo_node',
+        name='servo_node',
+        namespace=NAMESPACE,
+        output='screen',
+        parameters=[servo_params, 
+            {'update_period':0.01, 'planning_group_name': 'arm'}, 
+            moveit_config.robot_description,
+            moveit_config.robot_description_semantic,
+            moveit_config.robot_description_kinematics,
+            moveit_config.planning_pipelines,
+            moveit_config.joint_limits,
+            sim_time,
+        ])
+        
     rviz = Node(
         package='rviz2',
         executable='rviz2',
@@ -95,4 +113,5 @@ def generate_launch_description():
                               description='Abrir RViz con el panel MotionPlanning'),
         move_group,
         rviz,
+        servo,
     ])

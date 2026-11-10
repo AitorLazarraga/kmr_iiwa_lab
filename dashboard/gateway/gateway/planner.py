@@ -237,7 +237,8 @@ class MoveItPlanner:
         return p, (quat_mul(rot, quat) if quat is not None else None)
 
     # ------------------------------------------------------------ objetivos
-    def _base_goal(self, scaling):
+    def _base_goal(self, scaling, lin=False):
+        """lin=True: movimiento LIN de Pilz (línea recta del TCP); si no, OMPL."""
         goal = MoveGroup.Goal()
         req = goal.request
         req.group_name = self.cfg.MOVEIT_GROUP
@@ -245,8 +246,13 @@ class MoveItPlanner:
         req.allowed_planning_time = float(self.cfg.MOVEIT_PLANNING_TIME)
         req.max_velocity_scaling_factor = float(scaling)
         req.max_acceleration_scaling_factor = float(scaling)
-        req.pipeline_id = 'ompl'
-        req.planner_id = ''                       # el planificador por defecto del grupo
+        if lin:
+            req.pipeline_id = self.cfg.PILZ_PIPELINE
+            req.planner_id = 'LIN'
+            req.num_planning_attempts = 1         # Pilz es determinista
+        else:
+            req.pipeline_id = 'ompl'
+            req.planner_id = ''                   # el planificador por defecto del grupo
         req.start_state.is_diff = True            # desde el estado actual
         goal.planning_options.plan_only = False   # planificar y ejecutar
         goal.planning_options.planning_scene_diff.is_diff = True
@@ -268,7 +274,7 @@ class MoveItPlanner:
         goal.request.goal_constraints = [c]
         return goal
 
-    def pose_goal(self, pos, quat, scaling, position_tol=None, axis_tol=None):
+    def pose_goal(self, pos, quat, scaling, position_tol=None, axis_tol=None, lin=False):
         """Pose del TCP en ARM_BASE_FRAME, con la orientación COMPLETA fijada
         (±axis_tol en los tres ejes).
 
@@ -280,10 +286,14 @@ class MoveItPlanner:
         los errores de 12–50° respecto a la normal de la pared y los
         movimientos largos y raros (cada plan elegía una orientación al azar).
         Ahora el giro lo elegimos nosotros (en TOOL_TO_WALL_QUAT, eje X de la
-        herramienta hacia arriba) y MoveIt solo tiene que alcanzarlo."""
+        herramienta hacia arriba) y MoveIt solo tiene que alcanzarlo.
+
+        lin=True: Pilz LIN, el TCP va en línea recta desde donde está hasta la
+        pose (Pilz usa el centro de la restricción como objetivo exacto).
+        `scaling` es entonces la fracción de PILZ_MAX_TRANS_VEL."""
         position_tol = self.cfg.MOVEIT_POSITION_TOL if position_tol is None else position_tol
         axis_tol = self.cfg.MOVEIT_AXIS_TOL if axis_tol is None else axis_tol
-        goal = self._base_goal(scaling)
+        goal = self._base_goal(scaling, lin=lin)
         frame, link = self.cfg.ARM_BASE_FRAME, self.cfg.ARM_TCP_FRAME
         pc = PositionConstraint()
         pc.header.frame_id = frame

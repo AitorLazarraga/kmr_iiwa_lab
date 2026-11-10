@@ -24,6 +24,7 @@
 # ROS 2 control controllers
 /**/joint_trajectory_controller:
   ros__parameters:
+    allow_nonzero_velocity_at_trajectory_end: true
     joints:
       - kmr_iiwa_A1
       - kmr_iiwa_A2

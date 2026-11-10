@@ -337,4 +337,27 @@ body.no-control .needs-control { opacity: .35; pointer-events: none; }
 .screw-grid button.col-here { border-color: var(--ok); }
 .screw-grid button.tool-here { background: rgba(47, 191, 113, .18); }
 .pp-item.safe-pose b { color: #9be6bd; }
+.arm-cart { margin: 4px 14px 8px; display: flex; flex-direction: column; gap: 6px; }
+.arm-cart-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+.arm-cart-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.arm-cart-grid .cart-axis { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 4px; }
+.arm-cart-grid .cart-axis span { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: center; min-width: 22px; }
+.arm-cart .arm-moveit { margin: 0; }
+.seq-running .screw-grid button, .seq-running .arm-tool button, .seq-running .screw-cols button,
+.arm-cart.seq-running button { pointer-events: none; opacity: .55; }
+.arm-seq { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 6px; }
+.arm-seq-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.arm-seq-btns button { flex: 1; min-width: 0; }
+.arm-seq-txt { font-size: 12px; color: var(--muted); }
+.arm-seq-txt.run { color: #9fc6ff; }
+.arm-seq-txt.bad { color: #ff9b9b; }
+.arm-seq-txt.ok { color: #9be6bd; }
+.screw-grid button.seq-done { background: rgba(47, 191, 113, .28); }
+.screw-grid button.seq-doing { outline: 2px solid var(--accent); outline-offset: 1px; }
+.screw-grid button .seq-n { position: absolute; top: 2px; left: 4px; font-size: 10px; color: var(--muted); }
+.screw-grid button { position: relative; }
+.arm-tool { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.arm-tool span { flex: 1; }
+.arm-tool span.adv { color: #ffd88a; }
+.screw-grid button.tool-adv { background: rgba(240, 180, 41, .22); border-color: #f0b429; }
 .arm-screws-est { color: var(--muted); font-family: var(--mono); font-size: 11px; }

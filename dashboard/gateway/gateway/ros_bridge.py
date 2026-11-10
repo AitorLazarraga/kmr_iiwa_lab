@@ -79,6 +79,8 @@ except ImportError:  # pragma: no cover
 
 from . import planner as plannerlib
 from . import work as workgeo
+from .servo import ServoController
+from .sequencer import Sequencer
 from .arm import ArmController
 from .errors import CommandRejected  # noqa: F401  (main.py la importa desde aquí)
 
@@ -133,6 +135,10 @@ class RosBridge(Node):
         # Devuelve la postura de reposo ({name, positions}) o None; la pone main.py
         # (la postura está en la base de datos)
         self.safe_pose_provider = lambda: None
+        # Retroceso pendiente (pos, quat, label) si la herramienta estaba avanzada
+        # al empezar un movimiento de la base: lo calcula _new_job (cuando aún se
+        # conoce la pared) y lo usa _ensure_safe antes de ir a reposo.
+        self._pending_retreat = None
 
         # TF para la pose en el mapa
         self.tf_buffer = Buffer()
@@ -186,6 +192,8 @@ class RosBridge(Node):
         self.create_timer(0.5, self._check_ros, clock=steady)
 
         self.arm = ArmController(self, cfg)
+        self.arm.servo = ServoController(self, cfg, self.arm)
+        self.seq = Sequencer(self, cfg)
 
         log.info('Nodo ROS listo. Teleop -> %s, límites vx=[%.2f, %.2f] vy=±%.2f '
                  'wz=±%.2f, watchdog=%.2fs', cfg.TELEOP_TOPIC, cfg.MIN_VX,
@@ -370,9 +378,10 @@ class RosBridge(Node):
                 'approach_ready': self.approach_ready(),
                 'shift_ready': self.shift_ready(),
                 'camera': self.camera_status(),
-                'arm': self.arm.get_state(),
+                'arm': {**self.arm.get_state(), 'servo': self.arm.servo.get_state()},
                 'work_here': self._work_here_state(),
-                'safe_pose': self._safe_pose_state()}
+                'safe_pose': self._safe_pose_state(),
+                'sequence': self.seq.get_state()}
 
     def _safe_pose_state(self):
         pose = self.safe_pose()
@@ -388,7 +397,8 @@ class RosBridge(Node):
         screws = workgeo.screws(w['work']['wall'], w['work']['grid'])
         est = w['est']
         columns = sorted({(sc['col'], sc['u']) for sc in screws})
-        ref = self._shift_reference(w, screws)
+        tool = self._tool_state(w, screws)
+        ref = self._shift_reference(w, screws, tool)
         # Columna frente a la que está la referencia (si está a menos de la tolerancia)
         current = next((col for col, u in columns
                         if abs(u - ref['u']) <= self.cfg.SHIFT_TOL_LATERAL), None)
@@ -400,6 +410,10 @@ class RosBridge(Node):
                 'reference': ref['kind'],                  # 'tcp' | 'arm'
                 'reference_u': round(ref['u'], 4),
                 'tcp_screw': ref.get('screw'),             # {row, col} si el TCP está delante de uno
+                # {screw, state: standoff|advanced, gap} o None (ver _tool_state)
+                'tool': ({'screw': tool['screw'], 'state': tool['state'], 'gap': round(tool['gap'], 4),
+                          'tip_gap': round(tool['gap'] - self.cfg.SCREW_LENGTH, 4)}   # punta del tornillo
+                         if tool else None),
                 'est': {k: round(v, 4) for k, v in est.items()}}
 
     # --- dónde está la herramienta respecto a la pared (para el desplazamiento)
@@ -426,22 +440,90 @@ class RosBridge(Node):
                 'gap': c.BASE_HALF_LENGTH + est['distance'] - x,
                 'tilt': tilt}
 
-    def _shift_reference(self, w, screws):
-        """Qué se lleva frente a la columna al desplazar la base:
-          - si el TCP está delante de un tornillo (a SCREW_STANDOFF, dentro de
-            TCP_AT_SCREW_TOL), el TCP: el brazo no se mueve, así que tras el
-            desplazamiento queda delante del tornillo de la misma fila en la
-            columna destino. Se mide por TF, así que vale también tras mover el
-            brazo a mano (jog, posturas, ir a tornillo).
-          - si no, la base del brazo (link_0), con la posición medida (est)."""
+    def _tool_state(self, w, screws):
+        """¿Está la herramienta delante de un tornillo, y a qué distancia?
+          {'screw': {row, col}, 'state': 'standoff' | 'advanced', 'gap', 'u'}
+        - alineada: TCP a menos de TCP_AT_SCREW_TOL del tornillo en lateral y
+          altura, con el eje a menos de TCP_AT_SCREW_ANGLE de la normal
+        - standoff: a SCREW_STANDOFF de la pared (±TCP_STANDOFF_TOL)
+        - advanced: más cerca de la pared (tras un avance LIN)
+        None si no está alineada con ningún tornillo o está en otra distancia.
+        Se mide por TF, así que vale tras cualquier movimiento (también a mano)."""
         c = self.cfg
         t = self._tcp_on_wall(w)
-        if t is not None and abs(t['gap'] - c.SCREW_STANDOFF) <= c.TCP_AT_SCREW_TOL \
-                and t['tilt'] <= c.TCP_AT_SCREW_ANGLE:
-            sc = min(screws, key=lambda s: abs(s['u'] - t['u']) + abs(s['z'] - t['z']))
-            if abs(sc['u'] - t['u']) <= c.TCP_AT_SCREW_TOL and abs(sc['z'] - t['z']) <= c.TCP_AT_SCREW_TOL:
-                return {'kind': 'tcp', 'u': t['u'], 'screw': {'row': sc['row'], 'col': sc['col']}}
+        if t is None or t['tilt'] > c.TCP_AT_SCREW_ANGLE:
+            return None
+        sc = min(screws, key=lambda s: abs(s['u'] - t['u']) + abs(s['z'] - t['z']))
+        if abs(sc['u'] - t['u']) > c.TCP_AT_SCREW_TOL or abs(sc['z'] - t['z']) > c.TCP_AT_SCREW_TOL:
+            return None
+        if abs(t['gap'] - c.SCREW_STANDOFF) <= c.TCP_STANDOFF_TOL:
+            state = 'standoff'
+        elif -0.02 < t['gap'] < c.SCREW_STANDOFF - c.TCP_STANDOFF_TOL:
+            state = 'advanced'
+        else:
+            return None
+        return {'screw': {'row': sc['row'], 'col': sc['col']}, 'state': state,
+                'gap': t['gap'], 'u': t['u']}
+
+    def _shift_reference(self, w, screws, tool=...):
+        """Qué se lleva frente a la columna al desplazar la base:
+          - si la herramienta está delante de un tornillo (_tool_state), el TCP:
+            el brazo no se mueve, así que tras el desplazamiento queda delante
+            del tornillo de la misma fila en la columna destino (si estaba
+            avanzada, primero se retira).
+          - si no, la base del brazo (link_0), con la posición medida (est)."""
+        if tool is ...:
+            tool = self._tool_state(w, screws)
+        if tool is not None:
+            return {'kind': 'tcp', 'u': tool['u'], 'screw': tool['screw'], 'tool': tool}
         return {'kind': 'arm', 'u': w['est']['lateral']}
+
+    def _find_screw(self, w, row, col):
+        return next((sc for sc in workgeo.screws(w['work']['wall'], w['work']['grid'])
+                     if sc['row'] == row and sc['col'] == col), None)
+
+    def _retreat_plan(self, w=None):
+        """(pos, quat, label) para retirar la herramienta a SCREW_STANDOFF si
+        está avanzada delante de un tornillo; None si no hace falta."""
+        if w is None:
+            with self._lock:
+                w = self._work_here
+        if w is None:
+            return None
+        try:
+            tool = self._tool_state(w, workgeo.screws(w['work']['wall'], w['work']['grid']))
+            if tool is None or tool['state'] != 'advanced':
+                return None
+            r, c = tool['screw']['row'], tool['screw']['col']
+            _, pos, quat = self._screw_target(w, self._find_screw(w, r, c))
+        except CommandRejected:
+            return None
+        return pos, quat, f'retroceso F{r + 1}·C{c + 1} de {w["name"]}'
+
+    def _retreat_then(self, plan, then, what):
+        """Si hay `plan` (herramienta avanzada), retira la herramienta en LIN y
+        después llama a then(); si no, then() directamente. Sin preguntar ni
+        avisar: es el bloqueo acordado (nunca se hace `what` con la herramienta
+        avanzada)."""
+        def run():
+            try:
+                then()
+            except CommandRejected as e:
+                self._emit('warning', 'arm_retreat', f'No se ha podido {what}: {e}')
+        if plan is None:
+            run()
+            return
+        pos, quat, label = plan
+
+        def done(ok, reason):
+            if ok:
+                run()
+            else:
+                self._emit('warning', 'arm_retreat',
+                           f'No se ha podido {what}: la herramienta no se ha retirado ({reason})')
+        log.info('Herramienta avanzada: %s antes de %s', label, what)
+        self.arm.move_tcp(pos, quat, who='gateway', label=label, lin_speed=self.cfg.LIN_SPEED_RETREAT,
+                          internal=True, on_done=done)
 
     def get_config(self):
         """Límites que el frontend necesita para dibujar los controles."""
@@ -509,6 +591,7 @@ class RosBridge(Node):
     def stop(self, who='?'):
         log.warning('PARADA solicitada por %s', who)
         self._emit('emergency', 'stop', f'PARADA solicitada ({who})')
+        self.seq.abort(who)
         self.cancel_goal(who)
         self._publish_twist(0.0, 0.0, 0.0)
         self._teleop_active = False
@@ -566,6 +649,7 @@ class RosBridge(Node):
         La base va a moverse: el robot deja de estar frente a la pared, salvo en
         un desplazamiento lateral (keep_work=True), que sigue frente a la misma
         pared y actualiza la posición al terminar."""
+        retreat = None if keep_work else self._retreat_plan()
         with self._lock:
             self._job += 1
             job = self._job
@@ -573,6 +657,7 @@ class RosBridge(Node):
             timer, self._wait_timer = self._wait_timer, None
             if not keep_work:
                 self._work_here = None
+                self._pending_retreat = retreat
         if not keep_work:
             self.arm.planner.clear_wall()
         if timer is not None:
@@ -630,12 +715,15 @@ class RosBridge(Node):
             self._safe_failed(job, f'no hay postura «{self.cfg.ARM_SAFE_POSE_NAME}»')
             return
         if self.arm_in_safe_pose(pose):
+            with self._lock:
+                self._pending_retreat = None
             then()
             return
         with self._lock:
             if job != self._job:
                 return
             self._nav['arm_safe'] = True
+            retreat, self._pending_retreat = self._pending_retreat, None
         log.info('Brazo a %s antes de %s', pose['name'], what)
         self._emit('info', 'arm_safe', f'Brazo a {pose["name"]} antes de {what}')
 
@@ -648,9 +736,34 @@ class RosBridge(Node):
                 then()
             else:
                 self._safe_failed(job, reason or f'el brazo no ha llegado a {pose["name"]}')
+        def to_safe():
+            try:
+                self.arm.move_to(pose['positions'], who='gateway', label=pose['name'],
+                                 speed=self.cfg.ARM_SAFE_SPEED, internal=True, on_done=done)
+            except CommandRejected as e:
+                with self._lock:
+                    self._nav.pop('arm_safe', None)
+                self._safe_failed(job, str(e))
+
+        if retreat is None:
+            to_safe()
+            return
+        # Herramienta avanzada: primero retroceso LIN a SCREW_STANDOFF y después reposo
+        pos, quat, label = retreat
+
+        def retreated(ok, reason):
+            with self._lock:
+                if job != self._job:
+                    return
+            if ok:
+                to_safe()
+            else:
+                with self._lock:
+                    self._nav.pop('arm_safe', None)
+                self._safe_failed(job, f'la herramienta no se ha retirado ({reason})')
         try:
-            self.arm.move_to(pose['positions'], who='gateway', label=pose['name'],
-                             speed=self.cfg.ARM_SAFE_SPEED, internal=True, on_done=done)
+            self.arm.move_tcp(pos, quat, who='gateway', label=label, lin_speed=self.cfg.LIN_SPEED_RETREAT,
+                              internal=True, on_done=retreated)
         except CommandRejected as e:
             with self._lock:
                 self._nav.pop('arm_safe', None)
@@ -703,9 +816,11 @@ class RosBridge(Node):
                 self._nav['point_id'] = point_id
         self._navigate(job, x, y, yaw)
 
-    def approach(self, point, who='?'):
+    def approach(self, point, who='?', distance=None, lateral=0.0):
         """Solo el acercamiento fino frente a un punto de trabajo (botón «Ajustar»):
-        el robot ya tiene que estar delante de la pared."""
+        el robot ya tiene que estar delante de la pared. `distance` (por defecto
+        la del punto) y `lateral` los usa el secuenciador para el segundo ajuste
+        de las filas fuera de la banda de alcance."""
         if point.get('kind') != 'work' or not point.get('work'):
             self._reject(who, f'{point.get("name")!r} no es un punto de trabajo')
         if self.arm.moving():
@@ -720,7 +835,7 @@ class RosBridge(Node):
                          'target': point['name'], 'work': point['work'], 'point_id': point['id'],
                          'goal': {'x': round(point['x'], 3), 'y': round(point['y'], 3),
                                   'yaw': round(point['yaw'], 4)}}
-        self._approach(job, point['work'])
+        self._approach(job, point['work'], lateral=lateral, distance=distance)
 
     def run_route(self, route, who='?'):
         """route: dict de la base de datos con 'id', 'name' y 'stops'
@@ -956,14 +1071,14 @@ class RosBridge(Node):
                        f'Navegación fallida: {name}{detail}. El goal sigue marcado.')
 
     # --- acción ApproachWall (ajuste fino frente a la pared, 6.4)
-    def _approach(self, job, work, lateral=0.0):
+    def _approach(self, job, work, lateral=0.0, distance=None):
         """Lanza el acercamiento fino con los datos de un punto de trabajo, con
         el brazo en reposo antes (el ajuste puede avanzar, retroceder y girar).
         `lateral`: dónde dejar el brazo a lo largo del tramo (0 = frente al centro;
         el reajuste tras un desplazamiento fallido usa el que debía quedar)."""
-        self._ensure_safe(job, lambda: self._approach_now(job, work, lateral), 'ajustar')
+        self._ensure_safe(job, lambda: self._approach_now(job, work, lateral, distance), 'ajustar')
 
-    def _approach_now(self, job, work, lateral):
+    def _approach_now(self, job, work, lateral, distance=None):
         if not self.approach_ready():                 # p. ej. el nodo se ha caído durante la ruta
             self._approach_done(job, False, 'el nodo de ajuste (wall_approach) no está en marcha', None)
             return
@@ -971,13 +1086,15 @@ class RosBridge(Node):
         goal = ApproachWall.Goal()
         goal.wall_p1.x, goal.wall_p1.y = float(x1), float(y1)
         goal.wall_p2.x, goal.wall_p2.y = float(x2), float(y2)
-        goal.distance = float(work['distance'])
+        distance = float(work['distance'] if distance is None else distance)
+        goal.distance = distance
         goal.lateral = float(lateral)
         with self._lock:
             if job != self._job:
                 return
             self._nav['state'] = 'active'
             self._nav['lateral_goal'] = float(lateral)
+            self._nav['distance_goal'] = distance
             self._nav.pop('distance_remaining', None)
             self._nav['approach'] = {'phase': 'iniciando'}
             if self._nav.get('mode') == 'route':
@@ -1053,11 +1170,13 @@ class RosBridge(Node):
             est = None
             if ok and work:
                 # Posición real = la pedida + el error que ha medido el nodo
+                dgoal = self._nav.get('distance_goal', work['distance'])
                 f = finals or {'distance_error': 0.0, 'lateral_error': 0.0, 'angle_error': 0.0}
-                est = {'distance': work['distance'] + f['distance_error'],
+                est = {'distance': dgoal + f['distance_error'],
                        'lateral': lateral_goal + f['lateral_error'],
                        'angle': f['angle_error']}
-                self._work_here = {'point_id': point_id, 'name': target, 'work': work, 'est': est}
+                self._work_here = {'point_id': point_id, 'name': target, 'work': work, 'est': est,
+                                   'distance_goal': dgoal}
         errs = (f' (d {finals["distance_error"] * 1000:+.0f} mm, lat {finals["lateral_error"] * 1000:+.0f} mm, '
                 f'θ {math.degrees(finals["angle_error"]):+.1f}°)') if finals else ''
         if ok:
@@ -1084,13 +1203,15 @@ class RosBridge(Node):
             self._emit('warning', 'approach_failed', f'Ajuste frente a {target} fallido: {message}{errs}')
 
     # --- brazo frente a la pared (5.3)
-    def _screw_target(self, w, screw):
+    def _screw_target(self, w, screw, gap=None):
         """Pose del TCP delante de `screw` en ARM_BASE_FRAME, con la posición
-        medida de la base (w['est'])."""
+        medida de la base (w['est']), a `gap` m de la pared (SCREW_STANDOFF por
+        defecto)."""
         c = self.cfg
         est = w['est']
         pos_base, quat_base = plannerlib.screw_tcp_pose_base(
-            est['distance'], screw, c.SCREW_STANDOFF, c.BASE_HALF_LENGTH, c.ARM_OFFSET_Y,
+            est['distance'], screw, c.SCREW_STANDOFF if gap is None else gap,
+            c.BASE_HALF_LENGTH, c.ARM_OFFSET_Y,
             base_height=self.arm.planner.base_height(), lateral=est['lateral'], angle=est['angle'])
         pos, quat = self.arm.planner.to_arm_base(c.BASE_FRAME, pos_base, quat_base)
         return pos_base, pos, quat
@@ -1113,6 +1234,68 @@ class RosBridge(Node):
             return
         self.arm.check_tcp_now(pos, quat, f'tornillo F{row + 1}·C{col + 1} de {w["name"]} (tras desplazar la base)')
 
+    def arm_correct(self, who='?'):
+        """Botón «Corregir»: corrección corta con Servo hacia el tornillo en el
+        que está la herramienta (a SCREW_STANDOFF o avanzada), con la posición
+        medida de la base. Para el ciclo completamente manual."""
+        c = self.cfg
+        with self._lock:
+            w = self._work_here
+        if w is None:
+            self._reject(who, 'el robot no está ajustado frente a un punto de trabajo')
+        tool = self._tool_state(w, workgeo.screws(w['work']['wall'], w['work']['grid']))
+        if tool is None:
+            self._reject(who, 'la herramienta no está delante de ningún tornillo: usa primero un botón de tornillo')
+        r, col = tool['screw']['row'], tool['screw']['col']
+        gap = c.SCREW_STANDOFF if tool['state'] == 'standoff' else c.SCREW_LENGTH + c.SCREW_APPROACH_GAP
+        _, pos, quat = self._screw_target(w, self._find_screw(w, r, col), gap)
+        label = f'{"avance " if tool["state"] == "advanced" else "tornillo "}F{r + 1}·C{col + 1} de {w["name"]}'
+
+        def done(ok, _text):
+            if ok:
+                self.arm.check_tcp_now(pos, quat, f'{label} (corregido)', auto=False)
+        try:
+            self.arm.servo.correct(pos, quat, label, who=who, on_done=done)
+        except CommandRejected as e:
+            self._reject(who, str(e))
+
+    def arm_lin(self, point_id, action, who='?'):
+        """Paso 5.5: avance o retroceso LIN (Pilz, línea recta) a lo largo del
+        eje de la herramienta, delante del tornillo en el que está.
+          advance: hasta dejar la punta del tornillo a SCREW_APPROACH_GAP de la
+                   pared (TCP a SCREW_LENGTH + SCREW_APPROACH_GAP), a LIN_SPEED_APPROACH
+          retreat: de vuelta a SCREW_STANDOFF, a LIN_SPEED_RETREAT
+        Al terminar se comprueba el TCP (check_tcp_orientation)."""
+        c = self.cfg
+        if action not in ('advance', 'retreat'):
+            self._reject(who, f'acción LIN desconocida: {action}')
+        with self._lock:
+            w = self._work_here
+        if w is None or w['point_id'] != point_id:
+            self._reject(who, 'el robot no está ajustado frente a ese punto de trabajo')
+        if self.nav_running():
+            self._reject(who, 'no se puede mover el brazo mientras la base navega o se ajusta')
+        tool = self._tool_state(w, workgeo.screws(w['work']['wall'], w['work']['grid']))
+        if tool is None:
+            self._reject(who, 'la herramienta no está delante de ningún tornillo: usa primero un botón de tornillo')
+        r, col = tool['screw']['row'], tool['screw']['col']
+        name = f'F{r + 1}·C{col + 1} de {w["name"]}'
+        if action == 'advance':
+            gap = c.SCREW_LENGTH + c.SCREW_APPROACH_GAP
+            if gap > c.SCREW_STANDOFF - c.TCP_STANDOFF_TOL:
+                self._reject(who, f'SCREW_LENGTH + SCREW_APPROACH_GAP ({gap * 100:.1f} cm) no deja recorrido '
+                                  f'desde SCREW_STANDOFF ({c.SCREW_STANDOFF * 100:.0f} cm): revisa config.py')
+            if tool['state'] == 'advanced':
+                self._reject(who, f'la herramienta ya está avanzada en {name}')
+            speed, label = c.LIN_SPEED_APPROACH, f'avance {name}'
+        else:
+            if tool['state'] == 'standoff':
+                self._reject(who, f'la herramienta ya está retirada en {name}')
+            gap, speed, label = c.SCREW_STANDOFF, c.LIN_SPEED_RETREAT, f'retroceso {name}'
+        _, pos, quat = self._screw_target(w, self._find_screw(w, r, col), gap)
+        log.info('LIN %s (%s): TCP a %.1f mm de la pared a %.0f mm/s', label, who, gap * 1000, speed * 1000)
+        self.arm.move_tcp(pos, quat, who=who, label=label, check=True, lin_speed=speed)
+
     def arm_to_screw(self, point_id, row, col, speed=None, who='?'):
         """Lleva el TCP delante de un tornillo de la rejilla del punto de trabajo
         frente al que está ajustado el robot."""
@@ -1129,6 +1312,25 @@ class RosBridge(Node):
         # planner.screw_tcp_pose_base) y de ahí, por TF, a la base del brazo.
         c = self.cfg
         pos_base, pos, quat = self._screw_target(w, screw)
+        label = f'tornillo F{row + 1}·C{col + 1} de {w["name"]}'
+        tool = self._tool_state(w, workgeo.screws(w['work']['wall'], w['work']['grid']))
+        if tool is not None:
+            # La herramienta ya está delante de un tornillo: LIN en paralelo a la
+            # pared (cambio de fila, otra columna o corrección corta en el mismo).
+            # Si está avanzada, primero se retira (bloqueo acordado).
+            same = tool['screw'] == {'row': row, 'col': col}
+            if tool['state'] == 'advanced' and same:
+                log.info('TORNILLO %s (%s): retroceso LIN', label, who)
+                self.arm.move_tcp(pos, quat, who=who, label=f'retroceso F{row + 1}·C{col + 1} de {w["name"]}',
+                                  check=True, lin_speed=c.LIN_SPEED_RETREAT)
+                return
+            retreat = self._retreat_plan(w) if tool['state'] == 'advanced' else None
+            log.info('TORNILLO %s (%s): LIN desde F%d·C%d', label, who,
+                     tool['screw']['row'] + 1, tool['screw']['col'] + 1)
+            self._retreat_then(retreat, lambda: self.arm.move_tcp(
+                pos, quat, who=who, label=f'{label} (LIN)', check=True, lin_speed=c.LIN_SPEED_TRAVEL),
+                f'ir a {label}')
+            return
         log.info('TORNILLO F%d·C%d de %s (%s): TCP en %s (%.3f, %.3f, %.3f), a %.2f m de la pared',
                  row + 1, col + 1, w['name'], who, c.BASE_FRAME, *pos_base, c.SCREW_STANDOFF)
         self.arm.move_tcp(pos, quat, who=who, speed=speed,
@@ -1173,6 +1375,14 @@ class RosBridge(Node):
         if abs(shift) > c.SHIFT_MAX_DISTANCE:
             self._reject(who, f'desplazamiento de {abs(shift):.2f} m: más de {c.SHIFT_MAX_DISTANCE:.1f} m, '
                               'brazo a postura segura y nuevo ajuste')
+        retreat = self._retreat_plan(w) if ref['kind'] == 'tcp' and ref['tool']['state'] == 'advanced' else None
+        self._retreat_then(retreat, lambda: self._start_shift(w, point_id, col, shift, lateral_end,
+                                                              tool_screw, ref['kind'], what, who),
+                           'hacer el desplazamiento lateral')
+
+    def _start_shift(self, w, point_id, col, shift, lateral_end, tool_screw, ref_kind, what, who):
+        if self.nav_running():
+            raise CommandRejected('ya hay una navegación o un ajuste en curso')
         job = self._new_job(keep_work=True)
         log.info('DESPLAZAMIENTO de %s en %s: %s a la columna C%d, shift %+.3f m (lateral %+.3f -> %+.3f)',
                  who, w['name'], what, col + 1, shift, w['est']['lateral'], lateral_end)
@@ -1182,12 +1392,12 @@ class RosBridge(Node):
                          'goal': None, 'column': col, 'lateral_goal': lateral_end,
                          'tool_screw': tool_screw,
                          'shift': {'phase': 'iniciando', 'shift': round(shift, 4), 'traveled': 0.0,
-                                   'speed': 0.0, 'column': col, 'reference': ref['kind']}}
+                                   'speed': 0.0, 'column': col, 'reference': ref_kind}}
         (x1, y1), (x2, y2) = w['work']['wall']
         goal = ShiftAlongWall.Goal()
         goal.wall_p1.x, goal.wall_p1.y = float(x1), float(y1)
         goal.wall_p2.x, goal.wall_p2.y = float(x2), float(y2)
-        goal.distance = float(w['work']['distance'])
+        goal.distance = float(w.get('distance_goal', w['work']['distance']))
         goal.shift = float(shift)
         goal.lateral = float(lateral_end)
         future = self.shift_client.send_goal_async(
@@ -1229,7 +1439,30 @@ class RosBridge(Node):
             return                     # lo ha cancelado el gateway: cancel_goal ya lo gestiona
         r = res.result
         ok = res.status == GoalStatus.STATUS_SUCCEEDED and bool(r.success)
-        self._shift_done(job, ok, r.message or GOAL_STATUS_NAMES.get(res.status, ''), r)
+        message = r.message or GOAL_STATUS_NAMES.get(res.status, '')
+        if not ok and self._shift_compensable(job, r):
+            log.info('DESPLAZAMIENTO: el nodo informa «%s», pero los errores son compensables: '
+                     'se da por bueno y se compensan en el brazo', message)
+            ok, message = True, f'{message} (dentro del margen compensable)'
+        self._shift_done(job, ok, message, r)
+
+    def _shift_compensable(self, job, r):
+        """¿Se puede dar por bueno un desplazamiento cuya comprobación final ha
+        fallado? Sí si ha recorrido lo pedido (odometría), hay medida (errores no
+        todos cero: si no veía la pared, el nodo los deja a 0) y los errores están
+        dentro de SHIFT_ACCEPT_*: el brazo los compensa con la posición medida."""
+        c = self.cfg
+        with self._lock:
+            if job != self._job or self._nav.get('mode') != 'shift':
+                return False
+            asked = self._nav['shift']['shift']
+        errs = (r.final_distance_error, r.final_lateral_error, r.final_angle_error)
+        if not all(math.isfinite(e) for e in errs) or not any(errs):
+            return False
+        return (abs(r.traveled - asked) <= c.SHIFT_ACCEPT_TRAVEL
+                and abs(r.final_distance_error) <= c.SHIFT_ACCEPT_DISTANCE
+                and abs(r.final_lateral_error) <= c.SHIFT_ACCEPT_LATERAL
+                and abs(math.degrees(r.final_angle_error)) <= c.SHIFT_ACCEPT_ANGLE)
 
     def _shift_done(self, job, ok, message, r, fallback=True):
         with self._lock:
@@ -1250,7 +1483,7 @@ class RosBridge(Node):
             if ok and w is not None:
                 # Lateral con la ODOMETRÍA (desplazamiento relativo, más fiable que el
                 # SLAM en 30 cm); distancia y ángulo con el lidar de la comprobación final.
-                est = {'distance': w['work']['distance'] + r.final_distance_error,
+                est = {'distance': w.get('distance_goal', w['work']['distance']) + r.final_distance_error,
                        'lateral': w['est']['lateral'] - r.traveled,
                        'angle': r.final_angle_error}
                 self._work_here = {**w, 'est': est}
@@ -1283,11 +1516,31 @@ class RosBridge(Node):
             self._nav.update(mode='approach', state='sending', phase='adjusting', fallback=True)
             self._work_here = None
         self.arm.planner.clear_wall()          # la volverá a poner el ajuste si sale bien
-        self._approach(job, w['work'], lateral=u)
+        self._approach(job, w['work'], lateral=u, distance=w.get('distance_goal'))
 
     def nav_running(self):
         with self._lock:
             return self._nav['state'] in NAV_RUNNING
+
+    # --- para el secuenciador (sequencer.py)
+    def nav_state(self):
+        with self._lock:
+            return dict(self._nav)
+
+    def work_here_raw(self):
+        with self._lock:
+            return self._work_here
+
+    def tool_state_now(self):
+        """_tool_state con el punto de trabajo actual (o None)."""
+        with self._lock:
+            w = self._work_here
+        if w is None:
+            return None
+        return self._tool_state(w, workgeo.screws(w['work']['wall'], w['work']['grid']))
+
+    def retreat_plan_now(self):
+        return self._retreat_plan()
 
     def cancel_goal(self, who='?'):
         """Cancela el goal o la ruta en curso; si no hay nada en marcha, borra

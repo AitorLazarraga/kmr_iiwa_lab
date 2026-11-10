@@ -1,0 +1,27 @@
+move_group_name: arm
+command_in_type: "speed_units"
+publish_period: 0.01
+max_expected_latency: 0.1
+incoming_command_timeout: 0.1
+command_out_type: trajectory_msgs/JointTrajectory
+command_out_topic: /kmr_iiwa/joint_trajectory_controller/joint_trajectory
+publish_joint_positions: true
+publish_joint_velocities: true
+publish_joint_accelerations: false
+joint_topic: /kmr_iiwa/joint_states
+is_primary_planning_scene_monitor: false
+monitored_planning_scene_topic: /kmr_iiwa/monitored_planning_scene
+check_collisions: true
+collision_check_rate: 10.0
+self_collision_proximity_threshold: 0.01
+scene_collision_proximity_threshold: 0.03
+lower_singularity_threshold: 17.0
+hard_stop_singularity_threshold: 30.0
+leaving_singularity_threshold_multiplier: 2.0
+joint_limit_margins: [0.12]
+use_smoothing: true
+smoothing_filter_plugin_name: "online_signal_smoothing::AccelerationLimitedPlugin"
+apply_twist_commands_about_ee_frame: true
+pose_tracking: 
+  linear_tolerance: 0.001
+  angular_tolerance: 0.01

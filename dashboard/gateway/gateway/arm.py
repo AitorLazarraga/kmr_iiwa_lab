@@ -109,6 +109,8 @@ class ArmController():
         self._tcp_target = None        # (pos, quat) en ARM_BASE_FRAME si hay que comprobar el TCP al llegar
         self._on_done = {}             # job -> función(ok, reason) a llamar al terminar (reposo antes de mover la base)
 
+        self.servo = None              # ServoController (servo.py); lo pone ros_bridge
+
         node.create_timer(2.0, self._refresh_mode)
 
     def _refresh_mode(self):
@@ -399,8 +401,10 @@ class ArmController():
         if self.joint_positions() is None:
             raise CommandRejected('sin joint_states recientes')
 
-        # Un jog interrumpe cualquier movimiento a postura en curso
+        # Un jog interrumpe cualquier movimiento a postura en curso y a Servo
         self.cancel_move(who, quiet=True)
+        if self.servo is not None and self.servo.active():
+            self.servo.stop(who)
 
         with self._lock:
             mode = self._mode
@@ -490,11 +494,26 @@ class ArmController():
         if was_active:
             log.warning('Brazo: jog detenido por %s', who)
         self.cancel_move(who)
+        if self.servo is not None:
+            self.servo.stop(who)
 
     def moving(self):
-        """True si el brazo se está moviendo por orden del gateway (jog o postura)."""
+        """True si el brazo se está moviendo por orden del gateway (jog, postura o Servo)."""
         with self._lock:
-            return self._jog_active or (self._move is not None and self._move['state'] in MOVE_RUNNING)
+            busy = self._jog_active or (self._move is not None and self._move['state'] in MOVE_RUNNING)
+        return busy or (self.servo is not None and self.servo.active())
+
+    def mode(self):
+        with self._lock:
+            return self._mode
+
+    def stop_for_servo(self, who='?'):
+        """Antes de usar Servo: para el jog articular y cancela el movimiento
+        planificado en curso (Servo y MoveIt no pueden mandar a la vez)."""
+        with self._lock:
+            self._jog_active = False
+            self._jog_vel = [0.0] * 7
+        self.cancel_move(who, quiet=True)
 
     # ------------------------------------------------------------ movimientos planificados
     def _check_speed(self, speed):
@@ -548,18 +567,29 @@ class ArmController():
         self._start_move(goal, who, label or 'postura', speed, target=[round(p, 4) for p in target],
                          on_done=on_done)
 
-    def move_tcp(self, pos, quat, who='?', label=None, speed=None, check=False):
+    def move_tcp(self, pos, quat, who='?', label=None, speed=None, check=False,
+                 lin_speed=None, internal=False, on_done=None):
         """Lleva el TCP a una pose (en ARM_BASE_FRAME) con un plan de MoveIt.
-        Con check=True, al terminar se ejecuta check_tcp_orientation."""
-        speed = self._check_speed(speed)
-        self._check_can_move()
-        goal = self.planner.pose_goal(pos, quat, speed)
+        Con check=True, al terminar se ejecuta check_tcp_orientation.
+
+        lin_speed (m/s): movimiento LIN de Pilz en línea recta a esa velocidad
+        (las de config, fijas); si no, OMPL con `speed` (fracción del selector).
+        internal / on_done: como en move_to (movimientos que encadena el gateway)."""
+        if lin_speed is not None:
+            speed = min(1.0, float(lin_speed) / self.cfg.PILZ_MAX_TRANS_VEL)
+        elif not internal:
+            speed = self._check_speed(speed)
+        self._check_can_move(internal=internal)
+        goal = self.planner.pose_goal(pos, quat, speed, lin=lin_speed is not None)
         tcp_target = (tuple(pos), tuple(quat)) if check else None
-        self._start_move(goal, who, label or 'pose del TCP', speed, tcp_target=tcp_target)
+        self._start_move(goal, who, label or 'pose del TCP', speed, tcp_target=tcp_target,
+                         on_done=on_done)
 
     def _start_move(self, goal, who, label, speed, target=None, tcp_target=None, on_done=None):
         """Común a postura y pose: para el jog, cancela lo anterior, pasa a modo
         trayectoria si hace falta y manda el objetivo a MoveIt."""
+        if self.servo is not None and self.servo.active():
+            self.servo.stop(who)          # un plan de MoveIt sustituye al jog cartesiano / corrección
         with self._lock:
             self._jog_active = False
             self._jog_vel = [0.0] * 7
@@ -673,7 +703,7 @@ class ArmController():
             timer.start()
 
     # ------------------------------------------------------------ check del TCP
-    def check_tcp_now(self, pos, quat, label):
+    def check_tcp_now(self, pos, quat, label, auto=True):
         """check_tcp_orientation sin movimiento del brazo: tras un desplazamiento
         lateral de la base con la herramienta delante de un tornillo, comprueba
         que ha quedado delante del tornillo de la columna destino."""
@@ -682,7 +712,7 @@ class ArmController():
             self._move_current = job
             self._move = {'state': 'succeeded', 'label': label, 'check': {'state': 'checking'}}
         timer = threading.Timer(self.cfg.TCP_CHECK_DELAY,
-                                lambda: self.check_tcp_orientation(job, label, pos, quat))
+                                lambda: self.check_tcp_orientation(job, label, pos, quat, auto=auto))
         timer.daemon = True
         timer.start()
 
@@ -693,7 +723,7 @@ class ArmController():
             return False
         return all(abs(p - t) <= tol_rad for p, t in zip(positions, target))
 
-    def check_tcp_orientation(self, job, label, target_pos, target_quat):
+    def check_tcp_orientation(self, job, label, target_pos, target_quat, auto=True):
         """Compara por TF el TCP real con el pedido (posición y eje de la
         herramienta; el giro sobre su propio eje no cuenta). Deja el resultado en
         move['check'] y avisa en el dashboard si está fuera de tolerancia.
@@ -726,6 +756,20 @@ class ArmController():
             self._move = {**self._move, 'check': check}
         (log.info if level == 'info' else log.warning)(text)
         self.node.emit(level, 'arm_check', text)
+        if check.get('state') == 'out' and auto and self.cfg.TCP_AUTO_CORRECT and self.servo is not None:
+            self._auto_correct(target_pos, target_quat, label)
+
+    def _auto_correct(self, pos, quat, label):
+        """Check fuera de tolerancia: corrección corta con Servo. Al terminar
+        bien se repite el check (sin volver a corregir, para no entrar en bucle)."""
+        def done(ok, _text):
+            if ok:
+                self.check_tcp_now(pos, quat, f'{label} (corregido)', auto=False)
+        try:
+            self.servo.correct(pos, quat, label, on_done=done)
+        except CommandRejected as e:
+            log.warning('Brazo: sin corrección automática en %s: %s', label, e)
+            self.node.emit('warning', 'servo_correction', f'Sin corrección automática en {label}: {e}')
 
     def cancel_move(self, who='?', quiet=False):
         """Cancela el movimiento a postura en curso (si lo hay)."""

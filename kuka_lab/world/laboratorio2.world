@@ -1,0 +1,298 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <world name="kmr_iiwa_world">
+    <gravity>0 0 -9.81</gravity>
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin
+      filename="ignition-gazebo-physics-system"
+      name="ignition::gazebo::systems::Physics">
+    </plugin>
+    <plugin
+        filename="ignition-gazebo-scene-broadcaster-system"
+        name="ignition::gazebo::systems::SceneBroadcaster">
+    </plugin>
+    <plugin
+      filename="gz-sim-sensors-system"
+      name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <plugin filename="libignition-gazebo-imu-system.so"
+            name="ignition::gazebo::systems::Imu">
+    </plugin>
+    <plugin
+      filename="libignition-gazebo-magnetometer-system"
+      name="ignition::gazebo::systems::Magnetometer">
+    </plugin>
+    <plugin
+      filename="libignition-gazebo-forcetorque-system"
+      name="ignition::gazebo::systems::ForceTorque">
+    </plugin>
+    <!-- Necessary for spawining robot even from the launch-->
+    <plugin
+      filename="libignition-gazebo-user-commands-system"
+      name="ignition::gazebo::systems::UserCommands">
+    </plugin>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+            <specular>0.8 0.8 0.8 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+  
+    <!-- ===== Generado por generar_mundo.py a partir de laboratorio.yaml ===== -->
+    <!-- Origen: Esquina SE, junto al pasillo -->
+    <model name="pared_pasillo">
+      <static>true</static>
+      <pose>1.500 0.000 1.500 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="pared_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>3.200 0.200 3.000</size></box></geometry></collision>
+        <visual name="pared_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>3.200 0.200 3.000</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="pared_comedor">
+      <static>true</static>
+      <pose>3.000 -2.500 1.500 0 0 -1.5708</pose>
+      <link name="link">
+        <collision name="pared_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>5.200 0.200 3.000</size></box></geometry></collision>
+        <visual name="pared_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>5.200 0.200 3.000</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="pared_cristal">
+      <static>true</static>
+      <pose>13.000 -5.000 1.500 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="pared_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>20.300 0.300 3.000</size></box></geometry></collision>
+        <visual name="pared_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>20.300 0.300 3.000</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="pared_cosas">
+      <static>true</static>
+      <pose>2.500 3.000 1.500 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="pared_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>5.200 0.200 3.000</size></box></geometry></collision>
+        <visual name="pared_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>5.200 0.200 3.000</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="pared_cosas2">
+      <static>true</static>
+      <pose>5.000 4.500 1.500 0 0 1.5708</pose>
+      <link name="link">
+        <collision name="pared_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>3.200 0.200 3.000</size></box></geometry></collision>
+        <visual name="pared_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>3.200 0.200 3.000</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="pared_suelta">
+      <static>true</static>
+      <pose>6.000 6.000 1.500 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="pared_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>2.200 0.200 3.000</size></box></geometry></collision>
+        <visual name="pared_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>2.200 0.200 3.000</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="pared_jaula">
+      <static>true</static>
+      <pose>7.000 3.500 1.500 0 0 -1.5708</pose>
+      <link name="link">
+        <collision name="pared_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>5.200 0.200 3.000</size></box></geometry></collision>
+        <visual name="pared_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>5.200 0.200 3.000</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="pared_jaula2">
+      <static>true</static>
+      <pose>9.750 1.000 1.500 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="pared_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>5.700 0.200 3.000</size></box></geometry></collision>
+        <visual name="pared_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>5.700 0.200 3.000</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="pared_jaula3">
+      <static>true</static>
+      <pose>12.500 3.500 1.500 0 0 1.5708</pose>
+      <link name="link">
+        <collision name="pared_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>5.200 0.200 3.000</size></box></geometry></collision>
+        <visual name="pared_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>5.200 0.200 3.000</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="pared_laboratorio">
+      <static>true</static>
+      <pose>17.750 6.000 1.500 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="pared_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>10.700 0.200 3.000</size></box></geometry></collision>
+        <visual name="pared_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>10.700 0.200 3.000</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="pared_final">
+      <static>true</static>
+      <pose>23.000 0.500 1.500 0 0 -1.5708</pose>
+      <link name="link">
+        <collision name="pared_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>11.200 0.200 3.000</size></box></geometry></collision>
+        <visual name="pared_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>11.200 0.200 3.000</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="pared_cerrar">
+      <static>true</static>
+      <pose>0.000 1.500 1.500 0 0 -1.5708</pose>
+      <link name="link">
+        <collision name="pared_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>3.200 0.200 3.000</size></box></geometry></collision>
+        <visual name="pared_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>3.200 0.200 3.000</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="columna_1">
+      <static>true</static>
+      <pose>6.600 -4.200 1.500 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="caja_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>0.800 0.800 3.000</size></box></geometry></collision>
+        <visual name="caja_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>0.800 0.800 3.000</size></box></geometry><material><ambient>0.55 0.45 0.35 1</ambient><diffuse>0.55 0.45 0.35 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="columna_2">
+      <static>true</static>
+      <pose>10.600 -4.200 1.500 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="caja_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>0.800 0.800 3.000</size></box></geometry></collision>
+        <visual name="caja_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>0.800 0.800 3.000</size></box></geometry><material><ambient>0.55 0.45 0.35 1</ambient><diffuse>0.55 0.45 0.35 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="columna_3">
+      <static>true</static>
+      <pose>14.600 -4.200 1.500 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="caja_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>0.800 0.800 3.000</size></box></geometry></collision>
+        <visual name="caja_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>0.800 0.800 3.000</size></box></geometry><material><ambient>0.55 0.45 0.35 1</ambient><diffuse>0.55 0.45 0.35 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="columna_4">
+      <static>true</static>
+      <pose>18.600 -4.200 1.500 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="caja_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>0.800 0.800 3.000</size></box></geometry></collision>
+        <visual name="caja_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>0.800 0.800 3.000</size></box></geometry><material><ambient>0.55 0.45 0.35 1</ambient><diffuse>0.55 0.45 0.35 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="coche">
+      <static>true</static>
+      <pose>21.050 2.000 1.000 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="caja_col"><pose>0 0 0 0 0 0</pose><geometry><box><size>2.500 3.000 2.000</size></box></geometry></collision>
+        <visual name="caja_vis"><pose>0 0 0 0 0 0</pose><geometry><box><size>2.500 3.000 2.000</size></box></geometry><material><ambient>0.55 0.45 0.35 1</ambient><diffuse>0.55 0.45 0.35 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="mesa_robot_audio">
+      <static>true</static>
+      <pose>16.320 4.000 0.000 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="tablero_col"><pose>0 0 0.735 0 0 0</pose><geometry><box><size>0.800 1.500 0.030</size></box></geometry></collision>
+        <visual name="tablero_vis"><pose>0 0 0.735 0 0 0</pose><geometry><box><size>0.800 1.500 0.030</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata0_col"><pose>0.375 0.725 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata0_vis"><pose>0.375 0.725 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata1_col"><pose>0.375 -0.725 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata1_vis"><pose>0.375 -0.725 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata2_col"><pose>-0.375 0.725 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata2_vis"><pose>-0.375 0.725 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata3_col"><pose>-0.375 -0.725 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata3_vis"><pose>-0.375 -0.725 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="mesa_ordenadores">
+      <static>true</static>
+      <pose>13.250 2.200 0.000 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="tablero_col"><pose>0 0 0.735 0 0 0</pose><geometry><box><size>1.500 2.500 0.030</size></box></geometry></collision>
+        <visual name="tablero_vis"><pose>0 0 0.735 0 0 0</pose><geometry><box><size>1.500 2.500 0.030</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata0_col"><pose>0.725 1.225 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata0_vis"><pose>0.725 1.225 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata1_col"><pose>0.725 -1.225 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata1_vis"><pose>0.725 -1.225 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata2_col"><pose>-0.725 1.225 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata2_vis"><pose>-0.725 1.225 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata3_col"><pose>-0.725 -1.225 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata3_vis"><pose>-0.725 -1.225 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="mesa_pc">
+      <static>true</static>
+      <pose>14.750 1.300 0.000 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="tablero_col"><pose>0 0 0.735 0 0 0</pose><geometry><box><size>1.500 0.800 0.030</size></box></geometry></collision>
+        <visual name="tablero_vis"><pose>0 0 0.735 0 0 0</pose><geometry><box><size>1.500 0.800 0.030</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata0_col"><pose>0.725 0.375 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata0_vis"><pose>0.725 0.375 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata1_col"><pose>0.725 -0.375 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata1_vis"><pose>0.725 -0.375 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata2_col"><pose>-0.725 0.375 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata2_vis"><pose>-0.725 0.375 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata3_col"><pose>-0.725 -0.375 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata3_vis"><pose>-0.725 -0.375 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="mesa_cosas">
+      <static>true</static>
+      <pose>20.230 5.500 0.000 0 0 0.0000</pose>
+      <link name="link">
+        <collision name="tablero_col"><pose>0 0 0.735 0 0 0</pose><geometry><box><size>0.800 1.000 0.030</size></box></geometry></collision>
+        <visual name="tablero_vis"><pose>0 0 0.735 0 0 0</pose><geometry><box><size>0.800 1.000 0.030</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata0_col"><pose>0.375 0.475 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata0_vis"><pose>0.375 0.475 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata1_col"><pose>0.375 -0.475 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata1_vis"><pose>0.375 -0.475 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata2_col"><pose>-0.375 0.475 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata2_vis"><pose>-0.375 0.475 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+        <collision name="pata3_col"><pose>-0.375 -0.475 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry></collision>
+        <visual name="pata3_vis"><pose>-0.375 -0.475 0.360 0 0 0</pose><geometry><box><size>0.050 0.050 0.720</size></box></geometry><material><ambient>0.60 0.50 0.40 1</ambient><diffuse>0.60 0.50 0.40 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="panel_atornillado_jaula">
+      <static>true</static>
+      <pose>6.000 5.840 0.000 0 0 3.1416</pose>
+      <link name="link">
+        <collision name="panel_col"><pose>0 0 1.100 0 0 0</pose><geometry><box><size>1.600 0.100 2.200</size></box></geometry></collision>
+        <visual name="panel_vis"><pose>0 0 1.100 0 0 0</pose><geometry><box><size>1.600 0.100 2.200</size></box></geometry><material><ambient>0.86 0.83 0.76 1</ambient><diffuse>0.86 0.83 0.76 1</diffuse></material></visual>
+        <visual name="hueco_f0_c0_vis"><pose>-0.300 0.052 1.000 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f0_c1_vis"><pose>0.000 0.052 1.000 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f0_c2_vis"><pose>0.300 0.052 1.000 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f1_c0_vis"><pose>-0.300 0.052 1.300 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f1_c1_vis"><pose>0.000 0.052 1.300 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+        <visual name="hueco_f1_c2_vis"><pose>0.300 0.052 1.300 -1.5708 0 0</pose><geometry><cylinder><radius>0.020</radius><length>0.004</length></cylinder></geometry><material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material></visual>
+      </link>
+    </model>
+  </world>
+</sdf>

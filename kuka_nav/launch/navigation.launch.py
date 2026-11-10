@@ -6,6 +6,7 @@ Requiere la simulación lanzada antes:
 Modos:
     mode:=mapping       construye el mapa (por defecto)
     mode:=localization  se localiza sobre el mapa guardado en kuka_nav/maps
+    map:=/ruta/sin/extension  mapa para localization (por defecto kuka_nav/maps/laboratorio)
 """
 import os
 
@@ -16,6 +17,8 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+from nav2_common.launch import RewrittenYaml
+
 
 def generate_launch_description():
     pkg = get_package_share_directory('kuka_nav')
@@ -24,10 +27,15 @@ def generate_launch_description():
 
     use_sim_time = LaunchConfiguration('use_sim_time')
     mode = LaunchConfiguration('mode')
+    mapa = LaunchConfiguration('map')
 
     mapper_params = os.path.join(
         pkg, 'config', 'mapper_online_params_online_async.yaml')
-    localizer_params = os.path.join(pkg, 'config', 'localizer_params.yaml')
+    localizer_params = RewrittenYaml(
+        source_file=os.path.join(pkg, 'config', 'localizer_params.yaml'),
+        param_rewrites={'map_file_name': LaunchConfiguration('map')},
+        convert_types=True,
+    )
     nav2_params = os.path.join(pkg, 'config', 'nav2_params.yaml')
 
     is_mapping = IfCondition(PythonExpression(["'", mode, "' == 'mapping'"]))
@@ -95,6 +103,9 @@ def generate_launch_description():
             'mode', default_value='mapping',
             choices=['mapping', 'localization'],
             description='mapping: construir mapa · localization: usar mapa guardado'),
+        DeclareLaunchArgument(
+            'map', default_value=os.path.join(pkg, 'maps', 'laboratorio'),
+            description="Mapa a usar durante localizacion"),
         scan_merger,
         slam_mapping,
         slam_localization,

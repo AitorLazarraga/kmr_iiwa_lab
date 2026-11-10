@@ -3,48 +3,55 @@
 # Unidades: metros. Ángulos (yaw): grados, positivo = giro antihorario visto desde arriba.
 
 info:
-  nombre: laboratorio
-  origen: "Esquina SO, junto a la puerta principal"   # descríbelo para no olvidarlo
+  nombre: ikerland
+  origen: "Esquina SE, junto al pasillo"   # descríbelo para no olvidarlo
   fecha_medicion: "2026-10-19"
 
 # Donde aparece el robot al arrancar la simulación (centro de la base).
 # Se pasa al launch: x:=..  y:=..  Y:=.. (yaw en radianes; el script te lo imprime)
 robot_inicio:
-  x: 28.0
-  y: 4.0
+  x: 6.0
+  y: 2.0
   yaw: 0
 
 # Paredes: de un punto a otro. Para una puerta, parte la pared en dos tramos
 # y deja el hueco entre ellos.
 walls:
-  - {name: pared_larga,  from: [0.0, 0.0],  to: [30.0, 0.0],  thickness: 0.2, height: 3}
-  - {name: pared_zona_id,  from: [30.0, 0.0],  to: [30.0, 9.0], thickness: 0.2, height: 3}
-  - {name: pared_hasta_comedor,   from: [30.0, 9.0], to: [8.0, 9.0], thickness: 0.3, height: 3}
-  - {name: pared_comedor,  from: [8.0, 9.0], to: [8.0, 7.0],  thickness: 0.2, height: 3}
-  - {name: pared_hasta_puerta,  from: [8.0, 7.0],  to: [0.0, 7.0],  thickness: 0.2, height: 3}
-  - {name: pared_puerta, from: [0.0, 7.0], to: [0.0, 0.0], thickness: 0.2, height: 3}
+  - {name: pared_pasillo,  from: [0.0, 0.0],  to: [3.0, 0.0],  thickness: 0.2, height: 3}
+  - {name: pared_comedor,  from: [3.0, 0.0],  to: [3.0, -5.0], thickness: 0.2, height: 3}
+  - {name: pared_cristal,   from: [3.0, -5.0], to: [23.0, -5.0], thickness: 0.3, height: 3}
+  - {name: pared_cosas,  from: [0.0, 3.0], to: [5.0, 3.0],  thickness: 0.2, height: 3}
+  - {name: pared_cosas2,  from: [5.0, 3.0],  to: [5.0, 6.0],  thickness: 0.2, height: 3}
+  - {name: pared_suelta, from: [5.0, 6.0], to: [7.0, 6.0], thickness: 0.2, height: 3}
+  - {name: pared_jaula, from: [7.0, 6.0], to: [7.0, 1.0], thickness: 0.2, height: 3}
+  - {name: pared_jaula2, from: [7.0, 1.0], to: [12.5, 1.0], thickness: 0.2, height: 3}
+  - {name: pared_jaula3, from: [12.5, 1.0], to: [12.5, 6.0], thickness: 0.2, height: 3}
+  - {name: pared_laboratorio, from: [12.5, 6.0], to: [23.0, 6.0], thickness: 0.2, height: 3}
+  - {name: pared_final, from: [23.0, 6.0], to: [23.0, -5.0], thickness: 0.2, height: 3}
+  - {name: pared_cerrar, from: [0.0, 3.0], to: [0.0, 0.0], thickness: 0.2, height: 3}
+  
 
 # center = center of the object from above; size = [lenght_x, width_y, height]
 boxes:
-  - {name: armario_plc_1,    center: [10.35, 7.0], size: [0.7, 0.8, 2.5], yaw: 0}
-  - {name: armario_plc_2,    center: [14.0, 7.0], size: [0.7, 0.8, 2.5], yaw: 0}
-  - {name: armario_plc_3,    center: [17.7, 7.0], size: [0.7, 0.8, 2.5], yaw: 0}
-  - {name: cosas_tiradas, center: [15.5, 1.1],  size: [19.0, 2.3, 2.5], yaw: 0}
-  - {name: armario_electrico, center: [29.75, 5.0], size: [0.5, 2.0, 2.5], yaw: 0}
-  - {name: palet, center: [29.0, 6.5], size: [2.0, 1.0, 0.8], yaw: 0}
-  - {name: palet2, center: [29.0, 0.5], size: [2.0, 1.0, 0.8], yaw: 0}
-  - {name: armario_electrico2, center: [29.0, 2.0], size: [2.0, 1.0, 0.8], yaw: 0}
+  - {name: columna_1,    center: [6.6, -4.2], size: [0.8, 0.8, 3], yaw: 0}
+  - {name: columna_2,    center: [10.6, -4.2], size: [0.8, 0.8, 3], yaw: 0}
+  - {name: columna_3,    center: [14.6, -4.2], size: [0.8, 0.8, 3], yaw: 0}
+  - {name: columna_4,    center: [18.6, -4.2], size: [0.8, 0.8, 3], yaw: 0}
+  - {name: coche,    center: [21.05, 2.0], size: [2.5, 3, 2], yaw: 0}
+ 
 
 # size = [lenght, width, height]; leg = leg: leg lenght (cuadrada)
 tables:
-  - {name: mesa_benat, center: [25.25, 5.9], size: [1.5, 0.8, 0.75], yaw: 0,  leg: 0.05}
-  - {name: mesa_robots, center: [26, 8.5], size: [8, 0.8, 0.75], yaw: 0, leg: 0.05}
+  - {name: mesa_robot_audio, center: [16.32, 4.0], size: [0.8, 1.5, 0.75], yaw: 0,  leg: 0.05}
+  - {name: mesa_ordenadores, center: [13.25, 2.2], size: [1.5, 2.5, 0.75], yaw: 0, leg: 0.05}
+  - {name: mesa_pc, center: [14.75, 1.3], size: [1.5, 0.8, 0.75], yaw: 0, leg: 0.05}
+  - {name: mesa_cosas, center: [20.23, 5.5], size: [0.8, 1, 0.75], yaw: 0, leg: 0.05}
 
 # Columnas y objetos redondos
 # cylinders:
 #  - {name: columna_1, center: [6.0, 1.5], radius: 0.25, height: 2.5}
 
-# Paneles de atornillado (Fase 6.2): tabiques de prueba con una rejilla de huecos
+# Paneles de atornillado: tabiques de prueba con una rejilla de huecos
 # en la cara de trabajo. center = centro de la base; size = [ancho, grosor, alto];
 # yaw en grados: con yaw 0 el panel va a lo largo de X y su cara mira a +Y
 # (normal de la cara = (-sin yaw, cos yaw)).
@@ -52,15 +59,8 @@ tables:
 # bottom = altura de la fila inferior. Alturas elegidas para que el brazo llegue
 # con holgura con la herramienta perpendicular a la pared.
 screw_panels:
-  # Hueco libre a la derecha de cosas_tiradas (entre x 25 y 28): cara hacia el norte (+Y)
-  - name: panel_atornillado_este
-    center: [26.5, 0.4]
-    yaw: 0
-    size: [2.0, 0.1, 2.2]
-    holes: {cols: 3, rows: 2, spacing: [0.30, 0.30], bottom: 1.0, diameter: 0.04}
-  # Hueco libre a la izquierda de cosas_tiradas (entre x 0 y 6): cara hacia el este (+X)
-  - name: panel_atornillado_oeste
-    center: [0.6, 1.6]
-    yaw: -90
-    size: [2.0, 0.1, 2.2]
+  - name: panel_atornillado_jaula
+    center: [6.0, 5.84]
+    yaw: 180
+    size: [1.6, 0.1, 2.2]
     holes: {cols: 3, rows: 2, spacing: [0.30, 0.30], bottom: 1.0, diameter: 0.04}

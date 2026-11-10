@@ -162,6 +162,7 @@ function onState(s) {
   arm.setState(s.arm);
   arm.setWorkHere(s.work_here || null);
   arm.setSafePose(s.safe_pose || null);
+  arm.setSequence(s.sequence || null);
   map.setGoal(nav.goal ? { ...nav.goal, state: nav.state } : null);
   map.setRoute(route);
   points.setNav(nav);

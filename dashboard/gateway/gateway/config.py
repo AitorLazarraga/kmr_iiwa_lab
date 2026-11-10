@@ -107,6 +107,23 @@ MOVEIT_DEFAULT_SPEED = 0.25
 # cara de la pared, con la herramienta perpendicular. El tornillo sobresale
 # 5-8 cm del TCP, así que su punta queda a unos 4-7 cm de la pared.
 SCREW_STANDOFF = _env_float('SCREW_STANDOFF', 0.12)                    # m
+# --- Movimientos LIN (paso 5.5, Pilz) ------------------------------------------
+# Avance: la herramienta va en línea recta a lo largo de su eje hasta dejar la
+# PUNTA DEL TORNILLO a SCREW_APPROACH_GAP de la pared. El TCP es la cara del
+# portapuntas y el tornillo sobresale SCREW_LENGTH más allá (no está en el
+# modelo ni en la escena de MoveIt: las colisiones no lo protegen), así que el
+# TCP queda a SCREW_LENGTH + SCREW_APPROACH_GAP de la pared.
+SCREW_LENGTH = 0.08             # m que sobresale el tornillo del TCP (5-8 cm: con 8 cm se queda más lejos)
+SCREW_APPROACH_GAP = 0.005      # m entre la punta del tornillo y la pared al terminar el avance
+# Velocidades fijas por seguridad (no dependen del selector del dashboard)
+LIN_SPEED_APPROACH = 0.05       # m/s avanzando hacia la pared
+LIN_SPEED_RETREAT = 0.10        # m/s retrocediendo a SCREW_STANDOFF
+LIN_SPEED_TRAVEL = 0.10         # m/s entre tornillos con la herramienta a SCREW_STANDOFF
+# Límite cartesiano de Pilz (kuka_moveit_config/config/pilz_cartesian_limits.yaml,
+# max_trans_vel): la velocidad se envía como fracción de este valor
+PILZ_MAX_TRANS_VEL = 0.5        # m/s
+PILZ_PIPELINE = 'pilz_industrial_motion_planner'
+
 # Caja que representa la pared del punto de trabajo en la escena de MoveIt
 WORK_WALL_THICKNESS = 0.10      # m, hacia dentro desde la cara marcada
 WORK_WALL_HEIGHT = 2.5          # m desde el suelo
@@ -132,8 +149,9 @@ ARM_SAFE_SPEED = 0.50           # fracción de velocidad del movimiento automát
 # SCREW_STANDOFF de la pared, dentro de estas tolerancias), la columna de
 # referencia es la del TCP (el desplazamiento lo lleva al mismo tornillo de la
 # columna destino); si no, la del brazo (su base, link_0).
-TCP_AT_SCREW_TOL = 0.03         # m en lateral, altura y distancia a la pared
+TCP_AT_SCREW_TOL = 0.03         # m en lateral y altura respecto al tornillo
 TCP_AT_SCREW_ANGLE = 5.0        # ° de inclinación del eje de la herramienta
+TCP_STANDOFF_TOL = 0.025        # m: «a SCREW_STANDOFF» si está a ±2,5 cm (≥ SHIFT_ACCEPT_DISTANCE); más cerca = avanzada
 
 # --- Check del TCP (check_tcp_orientation) ---------------------------------
 # Tras llegar delante de un tornillo se compara por TF el TCP real con el
@@ -147,6 +165,38 @@ TCP_CORRECTION_MAX_POS = 0.01   # m
 TCP_CORRECTION_MAX_ANGLE = 3.0  # °
 TCP_CORRECTION_ATTEMPTS = 3
 
+# --- MoveIt Servo (paso 5.4) ---------------------------------------------------
+# Nodo servo_node lanzado en moveit_sim.launch.py (kuka_moveit_config/config/servo.yaml)
+SERVO_NODE = _env('SERVO_NODE', '/kmr_iiwa/servo_node')
+SERVO_RATE = 50.0               # Hz a los que el gateway publica consignas a Servo
+# Jog cartesiano: máximo fijo; el selector de velocidad de jog (25/50/100 %) se aplica sobre él
+SERVO_MAX_LINEAR = 0.05         # m/s
+SERVO_MAX_ANGULAR = math.radians(10.0)   # rad/s
+# Corrección del TCP con Servo (modo pose): se da por buena cuando el error está
+# dentro de las tolerancias del check durante SERVO_SETTLE_CYCLES ciclos seguidos;
+# cada intento dura como mucho SERVO_CORRECTION_TIMEOUT
+SERVO_SETTLE_CYCLES = 10        # ciclos de SERVO_RATE (0,2 s)
+SERVO_CORRECTION_TIMEOUT = 3.0  # s por intento
+TCP_AUTO_CORRECT = True         # corregir solo cuando el check del TCP falla
+
+# --- Secuenciador de atornillado (paso 6.6) ---------------------------------------
+SEQ_RATE = 10.0                 # Hz del bucle del secuenciador
+# PENDIENTE (Fase 7): sustituir por la acción del atornillador. Por ahora el
+# paso «atornillar» es una espera con la herramienta avanzada.
+SEQ_SCREW_DWELL = 1.0           # s
+# Banda de alturas alcanzables según la distancia del frontal a la pared:
+# (distancia m, altura mínima m, altura máxima m). Las filas que no se alcanzan
+# a la distancia del punto se hacen después, con un segundo ajuste (brazo a
+# reposo) a la distancia de la tabla más cercana que las cubra.
+# Valores del análisis de alcance con cinemática simplificada (herramienta
+# perpendicular): APROXIMADOS, hay que ajustarlos con pruebas.
+REACH_BANDS = [
+    (0.8, 1.30, 1.50),
+    (0.9, 0.90, 1.50),
+    (1.0, 0.90, 1.40),
+    (1.1, 0.90, 1.20),
+]
+
 # --- Desplazamiento lateral entre tornillos (ShiftAlongWall, secuenciador) ---
 # El gateway solo usa SHIFT_MAX_DISTANCE (para rechazar antes de enviar); el
 # resto los aplica el nodo wall_approach (wall_approach.yaml) y se dejan aquí
@@ -155,8 +205,17 @@ SHIFT_MAX_SPEED = 0.3           # m/s
 SHIFT_ACCEL = 0.5               # m/s²
 SHIFT_MAX_DISTANCE = 1.0        # m: hasta aquí, con el brazo a SCREW_STANDOFF y sin postura segura
 SHIFT_TOL_DISTANCE = 0.005      # m  \
-SHIFT_TOL_ANGLE = 0.5           # °   > comprobación final tras el desplazamiento
-SHIFT_TOL_LATERAL = 0.01        # m  /
+SHIFT_TOL_ANGLE = 0.5           # °   > comprobación final tras el desplazamiento (nodo)
+SHIFT_TOL_LATERAL = 0.01        # m  /  (el gateway la usa también para saber la columna actual)
+# Margen COMPENSABLE: si la comprobación final del nodo falla pero el
+# desplazamiento ha recorrido lo pedido y los errores medidos están dentro de
+# estos valores, el gateway lo da por bueno y los compensa en los objetivos del
+# brazo (posición medida de la base, `est`): sin reajuste ni ir a reposo. Solo
+# por encima se lanza el reajuste (que exige reposo).
+SHIFT_ACCEPT_DISTANCE = 0.02    # m
+SHIFT_ACCEPT_ANGLE = 1.5        # °
+SHIFT_ACCEPT_LATERAL = 0.02     # m
+SHIFT_ACCEPT_TRAVEL = 0.005     # m de diferencia entre lo recorrido (odometría) y lo pedido
 
 # --- Puntos de trabajo (Fase 6.3) ---------------------------------------------
 # Distancia por defecto del frontal del robot a la cara de la pared. Con la

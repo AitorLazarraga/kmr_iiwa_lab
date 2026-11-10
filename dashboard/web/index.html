@@ -145,6 +145,17 @@
             <button class="seg-btn" data-arm-plan-speed="0.5">50%</button>
           </div>
         </div>
+        <div class="arm-cart">
+          <div class="arm-cart-head">
+            <span>Jog cartesiano (Servo)</span>
+            <div class="seg" role="group" aria-label="Frame del jog cartesiano">
+              <button class="seg-btn active" data-cart-frame="tool" title="Ejes de la herramienta: Z hacia la pared">Herramienta</button>
+              <button class="seg-btn" data-cart-frame="base" title="Ejes fijos de la base del brazo (link_0)">Base brazo</button>
+            </div>
+          </div>
+          <div class="arm-cart-grid" id="arm-cart"></div>
+          <div class="arm-moveit" id="arm-servo">Servo: …</div>
+        </div>
         <div class="arm-moveit" id="arm-moveit">MoveIt: …</div>
         <div class="arm-moveit" id="arm-safe"></div>
 
@@ -175,7 +186,22 @@
             <b class="poses-title" id="arm-screws-title">Tornillos</b>
           </div>
           <small class="arm-screws-hint">Lleva el TCP delante del tornillo, perpendicular a la pared. Vista desde el robot.</small>
+          <div class="arm-seq" id="arm-seq">
+            <div class="arm-seq-btns">
+              <button class="needs-control" id="seq-start" title="Atornilla toda la rejilla: serpiente, desplazamientos de la base entre columnas, LIN entre filas y segundo ajuste si hay filas fuera de alcance">▶ Atornillar todo</button>
+              <button class="ghost needs-control" id="seq-pause" title="Termina el tornillo en curso (con el retroceso) y espera">⏸ Pausa</button>
+              <button class="ghost needs-control" id="seq-resume" title="Continúa; tras un fallo repite el tornillo">⏵ Reanudar</button>
+              <button class="ghost needs-control danger-text" id="seq-cancel" title="Para ya: retroceso si la herramienta está avanzada y brazo a reposo">✕ Cancelar</button>
+            </div>
+            <small class="arm-seq-txt" id="seq-txt"></small>
+          </div>
           <div class="screw-grid" id="screw-grid"></div>
+          <div class="arm-tool" id="arm-tool">
+            <span id="arm-tool-txt"></span>
+            <button class="ghost needs-control" id="arm-lin-adv" title="Avance LIN a lo largo del eje de la herramienta hasta dejar la punta del tornillo a 5 mm de la pared">⇥ Avanzar</button>
+            <button class="ghost needs-control" id="arm-lin-ret" title="Retroceso LIN hasta 12 cm de la pared">⇤ Retroceder</button>
+            <button class="ghost needs-control" id="arm-correct" title="Corrección corta del TCP con Servo hacia el tornillo en el que está la herramienta (máx. 1 cm / 3°)">⌖ Corregir</button>
+          </div>
           <small class="arm-screws-hint">Base frente a la columna (desplazamiento lateral paralelo a la pared; el brazo no se mueve):</small>
           <div class="screw-grid screw-cols" id="screw-cols"></div>
           <small class="arm-screws-est" id="arm-screws-ref"></small>

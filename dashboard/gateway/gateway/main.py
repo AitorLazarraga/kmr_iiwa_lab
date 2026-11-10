@@ -64,6 +64,8 @@ WebSocket /ws (requiere sesión; se cierra con código 4401 si no la hay)
         (punto de trabajo: navega y al llegar hace el ajuste fino frente a la pared)
     {"type": "approach", "point_id"}                                   requiere control
         (solo el ajuste fino; el robot ya debe estar delante de la pared)
+    {"type": "arm_lin", "point_id", "action": "advance"|"retreat"}   requiere control
+        (paso 5.5: avance/retroceso LIN a lo largo del eje de la herramienta)
     {"type": "shift", "point_id", "col"}                               requiere control
         (desplazamiento lateral paralelo a la pared hasta dejar el brazo frente a
          la columna; si la comprobación final falla, reajuste automático)
@@ -76,6 +78,13 @@ WebSocket /ws (requiere sesión; se cierra con código 4401 si no la hay)
         (TCP delante del tornillo, a SCREW_STANDOFF de la pared; el robot debe
          estar ajustado frente a ese punto de trabajo)
     {"type": "arm_cancel"}                                             requiere control
+    {"type": "arm_cart", "v": [vx,vy,vz,wx,wy,wz], "frame": "tool"|"base"}   requiere control, a 10 Hz
+        (paso 5.4: jog cartesiano con MoveIt Servo, m/s y rad/s)
+    {"type": "seq_start", "point_id"} / {"type": "seq_pause"} / {"type": "seq_resume"} / {"type": "seq_cancel"}
+        (paso 6.6: secuencia de atornillado del punto de trabajo; mientras está en marcha
+         se rechazan las órdenes manuales de base y brazo, salvo PARADA)
+    {"type": "arm_correct"}                                            requiere control
+        (corrección corta del TCP con Servo hacia el tornillo en el que está la herramienta)
     {"type": "arm_mode", "mode": "jog"|"trajectory"}                   requiere control
     {"type": "stop"}                                                   cualquier usuario
 
@@ -934,8 +943,24 @@ def _num(msg, key, default=None):
         raise CommandRejected(f"'{key}' debe ser un número")
 
 
-NEEDS_CONTROL = ('teleop', 'goal', 'go_point', 'approach', 'shift', 'cancel', 'run_route',
-                 'arm_jog', 'arm_move', 'arm_screw', 'arm_cancel', 'arm_mode')
+NEEDS_CONTROL = ('teleop', 'goal', 'go_point', 'approach', 'shift', 'arm_lin', 'cancel', 'run_route',
+                 'seq_start', 'seq_pause', 'seq_resume', 'seq_cancel',
+                 'arm_jog', 'arm_move', 'arm_screw', 'arm_cancel', 'arm_mode', 'arm_cart', 'arm_correct')
+
+
+# Órdenes manuales que no se aceptan mientras la secuencia está en marcha (sí en pausa)
+SEQ_BLOCKS = ('teleop', 'goal', 'go_point', 'approach', 'shift', 'run_route', 'arm_jog', 'arm_move',
+              'arm_screw', 'arm_lin', 'arm_cart', 'arm_correct', 'arm_mode')
+
+
+def _is_zero(kind, msg):
+    """Las órdenes de «soltar» (velocidad cero) de teleop y jog se aceptan siempre."""
+    if kind == 'teleop':
+        return all(not msg.get(k) for k in ('vx', 'vy', 'wz'))
+    if kind in ('arm_jog', 'arm_cart'):
+        v = msg.get('v')
+        return isinstance(v, list) and all(not x for x in v)
+    return False
 
 
 def handle_command(msg, client: Client):
@@ -960,10 +985,24 @@ def handle_command(msg, client: Client):
         log.warning('RECHAZADO %s de %s: no tiene el control', kind, who)
         raise CommandRejected('no tienes el control del robot')
 
+    if kind in SEQ_BLOCKS and bridge.seq.busy() and not _is_zero(kind, msg):
+        raise CommandRejected('hay una secuencia de atornillado en marcha: páusala o cancélala primero')
+
     if kind == 'teleop':
         bridge.teleop(_num(msg, 'vx', 0.0), _num(msg, 'vy', 0.0), _num(msg, 'wz', 0.0), who=who)
     elif kind == 'goal':
         bridge.send_goal(_num(msg, 'x'), _num(msg, 'y'), _num(msg, 'yaw', 0.0), who=who)
+    elif kind == 'seq_start':
+        point = db.get_point(int(_num(msg, 'point_id')))
+        if point is None:
+            raise CommandRejected('ese punto no existe')
+        bridge.seq.start(point, who=who)
+    elif kind == 'seq_pause':
+        bridge.seq.pause(who=who)
+    elif kind == 'seq_resume':
+        bridge.seq.resume(who=who)
+    elif kind == 'seq_cancel':
+        bridge.seq.cancel(who=who)
     elif kind in ('go_point', 'approach'):
         point = db.get_point(int(_num(msg, 'point_id')))
         if point is None:
@@ -977,6 +1016,11 @@ def handle_command(msg, client: Client):
             work = point['work'] if point['kind'] == 'work' else None
             bridge.send_goal(point['x'], point['y'], point['yaw'], who=who,
                              work=work, name=point['name'], point_id=point['id'])
+    elif kind == 'arm_lin':
+        action = msg.get('action')
+        if action not in ('advance', 'retreat'):
+            raise CommandRejected("'action' debe ser 'advance' o 'retreat'")
+        bridge.arm_lin(int(_num(msg, 'point_id')), action, who=who)
     elif kind == 'shift':
         bridge.shift_to_column(int(_num(msg, 'point_id')), int(_num(msg, 'col')), who=who)
     elif kind == 'cancel':
@@ -1007,6 +1051,11 @@ def handle_command(msg, client: Client):
                             speed=msg.get('speed'), who=who)
     elif kind == 'arm_cancel':
         bridge.arm.cancel_move(who=who)
+        bridge.arm.servo.stop(who=who)
+    elif kind == 'arm_cart':
+        bridge.arm.servo.jog(msg.get('v'), str(msg.get('frame', 'tool')), who=who)
+    elif kind == 'arm_correct':
+        bridge.arm_correct(who=who)
     elif kind == 'arm_mode':
         bridge.arm.set_mode(str(msg.get('mode')), who=who)
     else:
